@@ -1,0 +1,19 @@
+ffmpeg.exe 分发声明 / FFmpeg Redistribution Notice
+====================================================
+
+本目录中的 ffmpeg.exe 为 FFmpeg 6.1.1（essentials build），
+构建来源：https://www.gyan.dev/ffmpeg/builds/
+FFmpeg 官方网站：https://ffmpeg.org/
+
+该构建启用了 GPL 组件（libx264、libx265 等），因此按
+GNU General Public License v3（见同目录 LICENSE-ffmpeg-GPLv3.txt）授权再分发。
+
+再分发合规要点：
+  1. 随本软件分发时必须一并保留本声明与 GPLv3 许可证文本；
+  2. FFmpeg 的源码可由 https://ffmpeg.org/download.html 获取
+     （对应版本 6.1.1，构建配置见 ffmpeg -version 输出）；
+  3. FFmpeg 名称及标志为 FFmpeg 项目的商标/财产，此处仅作描述性使用；
+  4. 本软件以独立进程方式调用 ffmpeg，自身代码不受 GPL 约束。
+
+FFmpeg Copyright © the FFmpeg developers（完整作者名单见 ffmpeg -version 输出及源码树）。
+H.264/AAC 等编解码器可能涉及第三方专利池授权，商用大规模分发前请自行评估。

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LuboDown · B站直播回放下载</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ============ 侧边栏 ============ -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">录</div>
+      <div>
+        <div class="logo-name">LuboDown</div>
+        <div class="logo-sub">B站直播回放下载</div>
+      </div>
+    </div>
+
+    <nav>
+      <button class="nav-item active" data-page="sessions">
+        <span class="nav-ico">▸</span> 回放列表
+      </button>
+      <button class="nav-item" data-page="schedule">
+        <span class="nav-ico">◷</span> 定时任务
+      </button>
+      <button class="nav-item" data-page="settings">
+        <span class="nav-ico">⚙</span> 设置
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="foot-row"><span class="dot" id="dot-cookie"></span><span id="foot-cookie">Cookie 未配置</span></div>
+      <div class="foot-row"><span class="dot" id="dot-ffmpeg"></span><span id="foot-ffmpeg">ffmpeg 检测中…</span></div>
+      <div class="foot-tip">关闭窗口即最小化到托盘</div>
+    </div>
+  </aside>
+
+  <!-- ============ 主区域 ============ -->
+  <main class="main">
+    <!-- 回放列表页 -->
+    <section id="page-sessions" class="page active">
+      <header class="page-head">
+        <div>
+          <h1>回放列表</h1>
+          <p class="sub">仅保留最近约 14 天的回放，建议开启定时自动下载</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn ghost" id="btn-refresh">↻ 刷新列表</button>
+          <button class="btn primary" id="btn-check">立即检查新回放</button>
+        </div>
+      </header>
+      <div id="session-list" class="session-list">
+        <div class="empty">加载中…</div>
+      </div>
+    </section>
+
+    <!-- 定时任务页 -->
+    <section id="page-schedule" class="page">
+      <header class="page-head">
+        <div><h1>定时任务</h1><p class="sub">定时检查新场次；应用驻留后台时照常运行</p></div>
+      </header>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">定时检查</div>
+          <p class="desc">每间隔指定时间自动拉取回放列表，发现新场次记入列表。</p>
+          <div class="row">
+            <label class="switch">
+              <input type="checkbox" id="sw-auto-check">
+              <span class="slider"></span>
+            </label>
+            <span id="auto-check-label" class="row-label">已启用</span>
+          </div>
+          <div class="row">
+            <span class="row-label">检查间隔</span>
+            <select id="sel-interval">
+              <option value="15">每 15 分钟</option>
+              <option value="30">每 30 分钟</option>
+              <option value="60" selected>每 1 小时</option>
+              <option value="120">每 2 小时</option>
+              <option value="360">每 6 小时</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440">每 24 小时</option>
+            </select>
+          </div>
+          <div class="row">
+            <span class="row-label">下次检查</span>
+            <span class="mono" id="next-run">—</span>
+          </div>
+          <button class="btn primary" id="btn-check-2">立即检查</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">自动下载</div>
+          <p class="desc">检查到<b>新场次</b>且录像已生成时，自动开始下载（完整 MP4，约 20GB/4.5 小时场）。</p>
+          <div class="row">
+            <label class="switch">
+              <input type="checkbox" id="sw-auto-download">
+              <span class="slider"></span>
+            </label>
+            <span id="auto-download-label" class="row-label">已关闭</span>
+          </div>
+          <div class="row">
+            <span class="row-label">起始时间</span>
+            <input type="datetime-local" id="in-since">
+            <button class="btn small ghost" id="btn-clear-since">清除</button>
+          </div>
+          <p class="desc" style="margin-top:10px">仅自动下载该时间<b>之后开播</b>的场次，更早的场次只进列表、可手动下载。
+             首次开启自动下载前建议先设置，否则会下载当前列表里所有未下载场次。</p>
+          <p class="desc">任务队列串行下载；磁盘剩余空间不足 3GB 时会先提示。</p>
+        </div>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-title">运行日志</div>
+        <div id="log-box" class="log-box"></div>
+      </div>
+    </section>
+
+    <!-- 设置页 -->
+    <section id="page-settings" class="page">
+      <header class="page-head">
+        <div><h1>设置</h1><p class="sub">凭证保存在本机 config/settings.json，不会上传</p></div>
+      </header>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">B站凭证</div>
+          <p class="desc">浏览器登录 B 站后，F12 → 应用/Application → Cookie → 找到
+            <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；随时回来更新即可。</p>
+          <label class="field">
+            <span>SESSDATA</span>
+            <div class="pw-wrap">
+              <input type="password" id="in-sessdata" placeholder="" autocomplete="off">
+              <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏">👁</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>bili_jct</span>
+            <div class="pw-wrap">
+              <input type="password" id="in-bili-jct" placeholder="" autocomplete="off">
+              <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏">👁</button>
+            </div>
+          </label>
+          <div class="row gap">
+            <button class="btn primary" id="btn-save-cred">保存凭证</button>
+            <button class="btn ghost" id="btn-verify">检测有效性</button>
+            <span id="verify-result" class="hint"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">关注的主播</div>
+          <p class="desc">需要该主播给你的账号开通「回放剪辑权限」，否则无法获取其回放。</p>
+          <div id="anchor-list" class="anchor-list"></div>
+          <div class="row gap">
+            <input type="text" id="in-uid" placeholder="输入主播 UID（space.bilibili.com 后的数字）" class="grow">
+            <button class="btn primary" id="btn-add-anchor">添加</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">下载</div>
+          <p class="desc">以下设置修改后<b>立即自动保存</b>。</p>
+          <label class="field">
+            <span>下载目录</span>
+            <div class="row gap">
+              <input type="text" id="in-download-dir" class="grow" autocomplete="off">
+              <button class="btn ghost" id="btn-browse">浏览</button>
+            </div>
+          </label>
+          <div class="row">
+            <span class="row-label">分段并发数</span>
+            <select id="sel-concurrency">
+              <option>1</option><option>2</option><option>4</option>
+              <option selected>6</option><option>8</option><option>12</option><option>16</option>
+            </select>
+          </div>
+          <div class="row">
+            <label class="switch">
+              <input type="checkbox" id="sw-keep-parts">
+              <span class="slider"></span>
+            </label>
+            <span class="row-label">合成后保留分段文件（便于修复）</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">ffmpeg</div>
+          <p class="desc">用于把分段无损合成为 MP4。默认使用项目内置的 <code>bin/ffmpeg.exe</code>，无需配置；也可指定其他路径（修改后自动保存）。</p>
+          <label class="field">
+            <span>可执行文件路径或命令名</span>
+            <input type="text" id="in-ffmpeg" placeholder="ffmpeg" autocomplete="off">
+          </label>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

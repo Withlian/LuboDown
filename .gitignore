@@ -1,0 +1,22 @@
+# 运行时数据（含账号凭证与个人使用记录，切勿提交）
+config/
+downloads/
+auth/
+*.log
+
+# 构建产物
+build/
+dist/
+build_assets/
+LuboDown.spec
+*.pyc
+__pycache__/
+
+# ffmpeg 本体体积过大不入库（许可证与声明文件保留）
+bin/ffmpeg.exe
+
+# 本机工具会话数据
+.mimosa/
+.zcodeignore
+.video_agent/
+.v2c/
