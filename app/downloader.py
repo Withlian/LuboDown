@@ -359,27 +359,38 @@ class DownloadManager:
 
     # ------------- m3u8 -------------
     def _fetch_playlist(self, job: Job) -> list[tuple[str, float]]:
-        """返回 [(分段URL, EXTINF时长秒), ...]，顺序即播放顺序。"""
-        m3u8_url = self.client.get_slice_stream(
+        """拉取场次**全部子段**的 m3u8 并按时间顺序合并，
+        返回 [(分段URL, EXTINF时长秒), ...]。
+
+        手机竖屏直播的录像会被 B 站拆成多个碎片子段（推流重连所致），
+        只取第一个子段会得到一个几秒钟的"完整视频"。"""
+        entries = self.client.get_slice_entries(
             job.live_key, job.start_time, job.end_time, job.uid)
-        text = request(m3u8_url, raw=True).decode("utf-8", "replace")
-        urls: list[str] = []
-        durs: list[float] = []
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
+        pairs: list[tuple[str, float]] = []
+        for idx, e in enumerate(entries):
+            m3u8_url = e["stream"]
+            text = request(m3u8_url, raw=True).decode("utf-8", "replace")
+            urls: list[str] = []
+            durs: list[float] = []
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r"#EXTINF:([\d.]+)", line)
+                if m:
+                    durs.append(float(m.group(1)))
+                elif not line.startswith("#"):
+                    urls.append(line)
+            if not urls:
+                self.store.log(f"子段 {idx}（{fmt_ts(e['start_time'])}）没有分段，跳过")
                 continue
-            m = re.match(r"#EXTINF:([\d.]+)", line)
-            if m:
-                durs.append(float(m.group(1)))
-            elif not line.startswith("#"):
-                urls.append(line)
-        if not urls:
+            if len(durs) < len(urls):            # 兜底：缺 EXTINF 的段按 0 处理
+                durs += [0.0] * (len(urls) - len(durs))
+            pairs.extend((u if u.startswith("http") else urllib.parse.urljoin(m3u8_url, u), d)
+                         for u, d in zip(urls, durs))
+        if not pairs:
             raise ApiError(-2, "播放列表为空")
-        if len(durs) < len(urls):                 # 兜底：缺 EXTINF 的段按 0 处理
-            durs += [0.0] * (len(urls) - len(durs))
-        return [(u if u.startswith("http") else urllib.parse.urljoin(m3u8_url, u), d)
-                for u, d in zip(urls, durs)]
+        return pairs
 
     def _refresh_playlist(self, job: Job, expected_count: int) -> list[tuple[str, float]]:
         pairs = self._fetch_playlist(job)

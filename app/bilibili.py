@@ -37,12 +37,32 @@ class RequestBlocked(Exception):
     """URL 未通过安全校验。"""
 
 
+def _doh_resolve(host: str) -> list[str]:
+    """fake-ip 代理环境（如 Clash TUN）下 getaddrinfo 会被劫持，
+    改用公共 DNS 的 HTTP 接口（IP 直连，不依赖本地 DNS）解析真实地址。"""
+    for doh in (f"http://223.5.5.5/resolve?name={host}&type=A",
+                f"http://119.29.29.29/d?dn={host}"):
+        try:
+            with urllib.request.urlopen(doh, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            answer = data.get("Answer") or []
+            ips = [a["data"] for a in answer if isinstance(a, dict) and a.get("type") == 1]
+            if ips:
+                return ips
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return []
+
+
 def _resolve_global(host: str) -> list[str]:
     with _pin_lock:
         if host in _pinned:
             return _pinned[host]
     infos = socket.getaddrinfo(host, None)
     ips = sorted({i[4][0] for i in infos})
+    # 全部解析结果都落在内网/保留段 → 疑似 fake-ip 代理劫持，改用 DoH 取真实地址
+    if ips and all(not ipaddress.ip_address(ip).is_global for ip in ips):
+        ips = sorted(set(_doh_resolve(host))) or ips
     for ip in ips:
         if not ipaddress.ip_address(ip).is_global:
             raise RequestBlocked(f"域名 {host} 解析到非公网地址 {ip}")
@@ -190,15 +210,23 @@ class BiliClient:
                 break
         return out
 
-    def get_slice_stream(self, live_key: str, start: int, end: int, uid: int) -> str:
-        """他人场次切片流（需授权）。返回 m3u8 地址。"""
+    def get_slice_entries(self, live_key: str, start: int, end: int, uid: int) -> list[dict]:
+        """他人场次切片流（需授权）。返回该场次**全部**回放子段（按时间排序）。
+
+        手机竖屏直播会产生多个碎片子段（推流重连所致），必须全部合并下载。
+        """
         url = (f"{API_BASE}/xlive/web-room/v1/videoService/GetUserSliceStream"
                f"?live_key={live_key}&start_time={start}&end_time={end}&live_uid={uid}")
         r = request(url, cookie=self._cookie())
         lst = (r.get("data") or {}).get("list") or []
-        if not lst or not lst[0].get("stream"):
+        entries = [{"start_time": int(e.get("start_time") or 0),
+                    "end_time": int(e.get("end_time") or 0),
+                    "stream": e.get("stream") or "", "type": e.get("type")}
+                   for e in lst if e.get("stream")]
+        if not entries:
             raise ApiError(-2, "回放没有可用的视频流（可能尚未生成或已失效）")
-        return lst[0]["stream"]
+        entries.sort(key=lambda e: e["start_time"])
+        return entries
 
     def verify_login(self) -> dict:
         """用列表接口探测登录态与权限。返回 {ok, message}。"""
