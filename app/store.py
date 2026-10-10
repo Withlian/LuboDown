@@ -29,6 +29,7 @@ DEFAULT_SETTINGS = {
     "auto_download_since": 0,       # 仅自动下载该时间戳之后开播的场次（0=不限）
     "concurrency": 6,               # 分段下载并发数
     "keep_parts": False,            # 合成后是否保留分段文件
+    "name_with_anchor": False,      # 文件名附加主播名与开播时间
     "ffmpeg_path": "ffmpeg",        # ffmpeg 可执行文件
 }
 

@@ -67,7 +67,7 @@ class Api:
                         else min(16, max(1, int(patch[key])))
             except (TypeError, ValueError):
                 pass
-        for key in ("auto_check", "auto_download", "keep_parts"):
+        for key in ("auto_check", "auto_download", "keep_parts", "name_with_anchor"):
             if key in patch:
                 clean[key] = bool(patch[key])
         v = patch.get("auto_download_since")

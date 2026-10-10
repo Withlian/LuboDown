@@ -15,6 +15,8 @@ let lastLogCount = -1;
 let settingsLoaded = false;
 let pendingRemove = null;   // 两段式删除确认
 let countdownBase = null;
+let listFilter = "all";     // "all" 或主播 uid
+let listSort = "desc";      // desc=时间倒序（最新在前）
 
 /* ---------- 工具 ---------- */
 function toast(msg, type = "") {
@@ -218,6 +220,7 @@ function loadSettingsPage() {
   setVal("in-ffmpeg", s.ffmpeg_path || "");
   $("sel-concurrency").value = String(s.concurrency || 6);
   $("sw-keep-parts").checked = !!s.keep_parts;
+  $("sw-name-anchor").checked = !!s.name_with_anchor;
   $("in-sessdata").placeholder = s.has_sessdata ? "已保存" : "尚未填写";
   $("in-bili-jct").placeholder = s.has_bili_jct ? "已保存" : "尚未填写";
   renderAnchors(s.anchors || []);
@@ -297,6 +300,10 @@ $("sel-concurrency").addEventListener("change", async (e) => {
 $("sw-keep-parts").addEventListener("change", async (e) => {
   await call("save_settings", { keep_parts: e.target.checked });
   toast(e.target.checked ? "将保留分段文件" : "分段文件将在合成后清除", "ok");
+});
+$("sw-name-anchor").addEventListener("change", async (e) => {
+  await call("save_settings", { name_with_anchor: e.target.checked });
+  toast(e.target.checked ? "新下载的文件名将包含主播名与开播时间" : "文件名保持纯日期序号格式", "ok");
 });
 
 document.querySelectorAll(".pw-eye").forEach((b) => {
@@ -407,18 +414,48 @@ async function refresh() {
   if (!s) return;
   stateCache = s;
 
-  const hash = JSON.stringify([s.sessions, s.settings.has_sessdata, s.settings.has_bili_jct,
+  // 主播筛选 + 时间排序（仅影响列表展示，不改变数据本身）
+  let list = s.sessions;
+  if (listFilter !== "all") {
+    list = list.filter((x) => String(x.uid) === String(listFilter));
+  }
+  list = list.slice().sort((a, b) =>
+    listSort === "asc" ? a.start_time - b.start_time : b.start_time - a.start_time);
+
+  const hash = JSON.stringify([list, s.settings.has_sessdata, s.settings.has_bili_jct,
     s.ffmpeg_ok, s.scheduler.checking, s.scheduler.next_run_ts,
     s.settings.download_dir, (s.settings.anchors || [])]);
   if (hash !== lastSessionsHash) {
     lastSessionsHash = hash;
-    renderSessions(s.sessions);
+    renderSessions(list);
     syncScheduleControls(s);
     renderFoot(s);
+    renderAnchorFilter(s.settings.anchors || []);
     if (settingsLoaded) loadSettingsPage();
   }
   renderLogs(s.logs || []);
 }
+
+function renderAnchorFilter(anchors) {
+  const sel = $("sel-anchor-filter");
+  const cur = String(listFilter);
+  sel.innerHTML = `<option value="all">全部主播</option>` + anchors.map((a) =>
+    `<option value="${a.uid}">${esc(a.name)}</option>`).join("");
+  sel.value = cur;
+  if (sel.value !== cur) { sel.value = "all"; listFilter = "all"; }
+}
+
+$("sel-anchor-filter").addEventListener("change", (e) => {
+  listFilter = e.target.value;
+  lastSessionsHash = "";   // 强制重渲染
+  refresh();
+});
+$("btn-sort").addEventListener("click", () => {
+  listSort = listSort === "desc" ? "asc" : "desc";
+  $("btn-sort").textContent = `时间 ${listSort === "desc" ? "↓" : "↑"}`;
+  lastSessionsHash = "";
+  refresh();
+});
 
 function pollLoop() {
   refresh().finally(() => setTimeout(pollLoop, 1500));

@@ -47,6 +47,8 @@
           <p class="sub">仅保留最近约 14 天的回放，建议开启定时自动下载</p>
         </div>
         <div class="head-actions">
+          <select id="sel-anchor-filter" title="按主播筛选"></select>
+          <button class="btn ghost" id="btn-sort" title="切换排序">时间 ↓</button>
           <button class="btn ghost" id="btn-refresh">↻ 刷新列表</button>
           <button class="btn primary" id="btn-check">立即检查新回放</button>
         </div>
@@ -184,6 +186,13 @@
               <span class="slider"></span>
             </label>
             <span class="row-label">合成后保留分段文件（便于修复）</span>
+          </div>
+          <div class="row">
+            <label class="switch">
+              <input type="checkbox" id="sw-name-anchor">
+              <span class="slider"></span>
+            </label>
+            <span class="row-label">文件名附加主播名与开播时间（如 2026.10.3-01_主播名_19-59）</span>
           </div>
         </div>
 

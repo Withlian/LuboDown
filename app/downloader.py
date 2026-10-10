@@ -238,7 +238,8 @@ class DownloadManager:
 
     # ------------- 下载主体 -------------
     def _date_stem(self, job: Job) -> str:
-        """按日期命名，一律带当天序号：2026.9.25-01、2026.9.25-02（按开播时间排序）。"""
+        """按日期命名，一律带当天序号：2026.9.25-01、2026.9.25-02（按开播时间排序）。
+        开启 name_with_anchor 后追加主播名与开播时间：2026.9.25-01_主播名_19-59。"""
         d = datetime.fromtimestamp(job.start_time, TZ8).date()
         prefix = f"{d.year}.{d.month}.{d.day}"
         same_day = sorted(
@@ -248,7 +249,11 @@ class DownloadManager:
             key=lambda s: int(s["start_time"]))
         index = next((i for i, s in enumerate(same_day, 1)
                       if s.get("live_key") == job.live_key), 1)
-        return f"{prefix}-{index:02d}"
+        stem = f"{prefix}-{index:02d}"
+        if self.store.settings.get("name_with_anchor"):
+            t = datetime.fromtimestamp(job.start_time, TZ8)
+            stem += f"_{safe_name(job.name or str(job.uid))}_{t.strftime('%H-%M')}"
+        return stem
 
     def _session_dir(self, job: Job) -> tuple[Path, Path, Path]:
         root = self.store.download_root()
