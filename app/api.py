@@ -127,8 +127,12 @@ class Api:
         except Exception as e:
             return {"ok": False, "message": f"查询主播失败：{e}"}
         anchors = self._store.settings.get("anchors", [])
-        if any(int(a["uid"]) == uid for a in anchors):
-            return {"ok": False, "message": "该主播已存在"}
+        for a in anchors:
+            try:
+                if int(a["uid"]) == uid:
+                    return {"ok": False, "message": "该主播已存在"}
+            except (KeyError, TypeError, ValueError):
+                continue    # 跳过配置中的异常条目
         anchors.append({"uid": uid, "name": info.get("name") or str(uid)})
         self._store.save_settings({"anchors": anchors})
         self._store.log(f"已添加主播：{info.get('name')}（{uid}）")
@@ -152,7 +156,11 @@ class Api:
                 return {"ok": False, "message": "请先在设置中填写 SESSDATA"}
             total = added = 0
             for anchor in self._store.settings.get("anchors", []):
-                uid, name = int(anchor["uid"]), anchor.get("name", str(anchor["uid"]))
+                try:
+                    uid = int(anchor["uid"])
+                    name = anchor.get("name") or str(uid)
+                except (KeyError, TypeError, ValueError):
+                    continue
                 items = self._client.fetch_all_replays(uid)
                 from .scheduler import _to_record
                 records = [_to_record(uid, name, it) for it in items if it.get("live_key")]

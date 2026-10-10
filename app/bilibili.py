@@ -39,11 +39,12 @@ class RequestBlocked(Exception):
 
 def _doh_resolve(host: str) -> list[str]:
     """fake-ip 代理环境（如 Clash TUN）下 getaddrinfo 会被劫持，
-    改用公共 DNS 的 HTTP 接口（IP 直连，不依赖本地 DNS）解析真实地址。"""
+    改用公共 DNS 的 HTTP 接口（IP 直连，不走系统代理、不依赖本地 DNS）解析真实地址。"""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for doh in (f"http://223.5.5.5/resolve?name={host}&type=A",
                 f"http://119.29.29.29/d?dn={host}"):
         try:
-            with urllib.request.urlopen(doh, timeout=8) as resp:
+            with opener.open(doh, timeout=8) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace"))
             answer = data.get("Answer") or []
             ips = [a["data"] for a in answer if isinstance(a, dict) and a.get("type") == 1]
@@ -118,9 +119,14 @@ class _PinnedHandler(urllib.request.HTTPSHandler):
                             context=self._context)
 
 
+# 显式空 ProxyHandler 覆盖默认行为：B 站均为国内直连端点，
+# 不读取系统代理——避免代理工具（Clash 等）换端口/退出后 urllib
+# 仍把请求发给已失效的 127.0.0.1:7890 导致连接被拒。
+_no_proxy = urllib.request.ProxyHandler({})
 _opener = urllib.request.build_opener(
     urllib.request.HTTPRedirectHandler(),
     urllib.request.HTTPDefaultErrorHandler(),
+    _no_proxy,
     _PinnedHandler(),
 )
 
@@ -163,7 +169,13 @@ def request(url: str, cookie: str = "", data: dict | None = None, method: str = 
             last_err = e
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
-    raise ApiError(-1, f"网络错误: {last_err}")
+    msg = f"网络错误: {last_err}"
+    winerror = getattr(last_err, "winerror", None)
+    if winerror == 10061:
+        msg += "（连接被拒绝：若开启了代理工具，请确认其监听端口与系统代理一致，或重启代理后重试）"
+    elif winerror in (10054, 10060):
+        msg += "（连接被重置或超时：请检查网络与代理节点）"
+    raise ApiError(-1, msg)
 
 
 def cookie_str(sessdata: str, bili_jct: str) -> str:
@@ -191,15 +203,18 @@ class BiliClient:
         return {"name": info.get("uname", str(uid)),
                 "room_id": r.get("data", {}).get("room_info", {}).get("room_id")}
 
-    def get_replay_list(self, uid: int, page: int = 1, page_size: int = 30) -> dict:
-        """他人回放列表（需该主播授权剪辑权限）。time_range=3 即近14天。"""
+    def get_replay_list(self, uid: int, page: int = 1, page_size: int = 20) -> dict:
+        """他人回放列表（需该主播授权剪辑权限）。time_range=3 即近14天。
+
+        注意：B 站 2026-10 起 page_size 超过 20 会返回空列表（total 仍正确），
+        因此这里上限取 20，翻页由 fetch_all_replays 完成。"""
         url = (f"{API_BASE}/xlive/web-room/v1/videoService/GetOtherSliceList"
                f"?live_uid={uid}&time_range=3&page={page}&page_size={page_size}")
         r = request(url, cookie=self._cookie())
         return r.get("data") or {}
 
     def fetch_all_replays(self, uid: int) -> list[dict]:
-        """翻页拉全（14天窗口通常一页足够，防御性翻页）。"""
+        """翻页拉全（每页 20 条，防御性翻页）。"""
         out: list[dict] = []
         for page in range(1, 6):
             data = self.get_replay_list(uid, page=page)
