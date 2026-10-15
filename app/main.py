@@ -8,6 +8,7 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -124,7 +125,11 @@ def run():
         ))
     threading.Thread(target=icon.run, daemon=True).start()
 
-    webview.start(debug=False)
+    # 固定 WebView2 数据目录：避免 pywebview 隐私模式默认行为
+    # （每次启动 tempfile.mkdtemp 新建目录，进程被强杀时残留泄漏）。
+    # storage_path 与 private_mode=True 可共存：隐私开关独立于目录（IsInPrivateModeEnabled）。
+    webview_data_dir = Path(tempfile.gettempdir()) / "LuboDown_WebView2"
+    webview.start(debug=False, storage_path=str(webview_data_dir))
 
 
 if __name__ == "__main__":
