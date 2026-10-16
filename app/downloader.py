@@ -185,6 +185,11 @@ class DownloadManager:
 
     def start(self, live_key: str) -> str:
         with self._lock:
+            # 顺带清理失效任务（终态且会话已不存在），
+            # 防止残留任务状态覆盖之后重建的同名会话
+            for k in [k for k, j in self.jobs.items()
+                      if j.status not in ACTIVE_STATES and k not in self.store.sessions]:
+                del self.jobs[k]
             job = self.jobs.get(live_key)
             if job and job.status in ACTIVE_STATES:
                 return job.status
@@ -219,6 +224,18 @@ class DownloadManager:
     def all_job_views(self) -> dict[str, dict]:
         with self._lock:
             return {k: j.view() for k, j in self.jobs.items()}
+
+    def discard(self, live_key: str) -> None:
+        """会话被删除时同步移除任务记录（进行中的除外，删除流程会先拒绝）。"""
+        with self._lock:
+            job = self.jobs.get(live_key)
+            if job and job.status not in ACTIVE_STATES:
+                del self.jobs[live_key]
+
+    def purge_parts(self, live_key: str, name, uid) -> None:
+        """删除会话后清理其分段目录（带重试，失败记录日志）。"""
+        anchor_dir = self.store.download_root() / safe_name(name or str(uid or ""))
+        self._cleanup_parts(anchor_dir / f".parts_{live_key}")
 
     # ------------- 队列线程 -------------
     def _mark_paused(self, job: Job) -> None:

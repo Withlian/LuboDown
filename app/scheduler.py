@@ -10,15 +10,15 @@ import time
 from .downloader import fmt_ts
 
 
+READY_GRACE_SEC = 30 * 60   # duration 缺失时，结束后多久视为切片已就绪
+
+
 def _to_record(uid: int, name: str, it: dict) -> dict:
     live = it.get("live_info") or {}
     video = it.get("video_info") or {}
-    alarm = it.get("alarm_info") or {}
-    duration = video.get("duration") or 0
-    # alarm/alert 描述的是主播侧"合成MP4"的状态，与切片流无关：
-    # 只要在切片时长存在（录像可用）时一律不显示，避免误导。
-    alert = "" if duration else (
-        video.get("alert_message") or alarm.get("message") or "录像缺失")
+    # 不展示 alarm_info/alert_message："录像生成失败"等描述的是主播侧合成 MP4
+    # 的状态，与可下载的切片流无关（竖屏场几乎全报但都能下）。切片是否真的
+    # 缺失，以实际拉取播放列表的报错为准。
     return {
         "live_key": str(it.get("live_key") or ""),
         "uid": uid,
@@ -29,15 +29,21 @@ def _to_record(uid: int, name: str, it: dict) -> dict:
         "cover": live.get("cover", ""),
         "start_time": int(it.get("start_time") or 0),
         "end_time": int(it.get("end_time") or 0),
-        "duration": duration,
+        "duration": video.get("duration") or 0,
         "replay_status": video.get("replay_status"),
-        "alert_message": alert,
     }
 
 
 def is_ready(rec: dict) -> bool:
-    """切片时长有效即视为可下载（replay_status/alarm 只反映主播侧合成状态）。"""
-    return (rec.get("duration") or 0) > 0 and rec.get("end_time", 0) > rec.get("start_time", 0) > 0
+    """切片流是否可下载。
+
+    duration 反映的是主播侧合成 MP4 的时长，竖屏场可能恒为 0 但切片完整
+    可下：duration>0 立即可下；缺失时等结束后留出缓冲再放行，避免对
+    尚未生成切片的场次空跑一次失败下载。"""
+    if not (rec.get("end_time", 0) > rec.get("start_time", 0) > 0):
+        return False
+    return ((rec.get("duration") or 0) > 0
+            or time.time() > int(rec["end_time"]) + READY_GRACE_SEC)
 
 
 class Scheduler:

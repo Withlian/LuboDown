@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
-from .downloader import resolve_ffmpeg, safe_name
+from .downloader import resolve_ffmpeg
+from .store import ACTIVE_STATES
 
 # 数值设置的合法区间（前端下拉只提供其中常用档位）
 SETTING_RANGES = {
@@ -31,7 +31,7 @@ class Api:
         for rec in self._store.all_sessions():
             view = {k: rec.get(k) for k in (
                 "live_key", "uid", "name", "title", "cover", "start_time", "end_time",
-                "duration", "replay_status", "alert_message", "status", "error")}
+                "duration", "replay_status", "status", "error")}
             fp = self._store.resolve_session_file(rec)
             view["file"] = str(fp) if fp else ""
             jv = jobs.get(rec["live_key"])
@@ -171,7 +171,7 @@ class Api:
 
     def delete_session(self, live_key: str, delete_files: bool = False) -> dict:
         job = self._manager.job_view(live_key)
-        if job and job["status"] in ("downloading", "merging", "queued"):
+        if job and job.status in ACTIVE_STATES:
             return {"ok": False, "message": "请先暂停下载再删除"}
         rec = self._store.sessions.get(live_key)
         if delete_files and rec:
@@ -183,11 +183,11 @@ class Api:
             except OSError as e:
                 return {"ok": False, "message": f"删除文件失败：{e}"}
         self._store.remove_session(live_key)
+        # 同步移除任务记录并清理分段目录：任务残留会把之后重建的同名会话
+        # 覆盖成旧状态，分段残留会让重建后的下载"未下先续"
+        self._manager.discard(live_key)
         if rec:
-            # 连分段目录一起清理
-            root = self._store.download_root()
-            name = safe_name(rec.get("name") or str(rec.get("uid") or ""))
-            shutil.rmtree(root / name / f".parts_{live_key}", ignore_errors=True)
+            self._manager.purge_parts(live_key, rec.get("name"), rec.get("uid"))
         return {"ok": True}
 
     # ============ 文件 ============

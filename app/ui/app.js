@@ -112,7 +112,6 @@ function progressHtml(jv) {
 
 function sessCard(s) {
   const dur = fmtDur(s.duration || (s.end_time > s.start_time ? s.end_time - s.start_time : 0));
-  const alert = s.alert_message ? `<div class="sess-alert" title="${esc(s.alert_message)}">⚠ ${esc(s.alert_message)}</div>` : "";
   const err = s.error ? `<div class="sess-alert" title="${esc(s.error)}">✖ ${esc(s.error)}</div>` : "";
   const liveJob = ACTIVE_STATES.has(s.status) && s.total_segs;
   const cover = s.cover
@@ -130,7 +129,7 @@ function sessCard(s) {
         <span class="mono">${fmtTime(s.start_time)} ~ ${fmtTime(s.end_time)}</span>
         <span>时长 ${dur}</span>
       </div>
-      ${alert}${err}
+      ${err}
       ${liveJob ? progressHtml(s) : ""}
     </div>
     <div class="sess-actions">${sessActions(s)}</div>

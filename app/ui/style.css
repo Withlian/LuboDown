@@ -1,5 +1,6 @@
 /* LuboDown UI —— 深色主题 */
 :root {
+  color-scheme: dark;   /* 原生控件（日期选择器/日历弹层）跟随深色 */
   --bg: #0f1115;
   --panel: #171a21;
   --panel-2: #1d212b;
@@ -168,7 +169,7 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 .switch input:checked + .slider::before { transform: translateX(20px); background: #fff; }
 
 /* 输入 */
-input[type=text], input[type=password], select {
+input[type=text], input[type=password], input[type=datetime-local], select {
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 10px; color: var(--text);
   padding: 9px 12px; font-size: 13.5px; outline: none;
