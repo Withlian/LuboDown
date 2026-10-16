@@ -110,11 +110,6 @@ class _PinnedConnection(http.client.HTTPSConnection):
                 break
             except OSError as e:
                 err = e
-                if self.sock is not None:
-                    try:
-                        self.sock.close()
-                    finally:
-                        self.sock = None
         if self.sock is None:
             raise err if err else OSError("no address")
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
@@ -146,21 +141,17 @@ class ApiError(Exception):
         self.message = message
 
 
-def request(url: str, cookie: str = "", data: dict | None = None, method: str = "GET",
-            timeout: int = 30, retries: int = 2, raw: bool = False):
-    """安全请求。raw=False 时解析 JSON 并检查 B 站 code；raw=True 返回二进制。"""
+def request(url: str, cookie: str = "", timeout: int = 30, retries: int = 2,
+            raw: bool = False):
+    """安全 GET。raw=False 时解析 JSON 并检查 B 站 code；raw=True 返回二进制。"""
     headers = {"User-Agent": UA, "Referer": "https://live.bilibili.com/"}
     if cookie:
         headers["Cookie"] = cookie
-    body = None
-    if data is not None:
-        body = urllib.parse.urlencode(data).encode()
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
 
     last_err: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            req = urllib.request.Request(url, data=body, headers=headers, method=method)
+            req = urllib.request.Request(url, headers=headers)
             with _opener.open(req, timeout=timeout) as resp:
                 content = resp.read()
             if raw:

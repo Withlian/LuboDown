@@ -1,8 +1,8 @@
 """LuboDown —— 回放下载器。
 
 流程：GetUserSliceStream 拿 m3u8 -> 并发下载分段（可断点续传、
-签名过期自动刷新播放列表）-> ffmpeg concat 复封装为单个 MP4。
-所有网络访问复用 bilibili.request 的安全校验。
+签名过期自动刷新播放列表）-> ffmpeg 经本地 HLS 播放列表复封装为单个 MP4。
+所有网络访问都经过 bilibili 的 URL 安全校验（https/域名白名单/公网 IP 固定）。
 """
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ class _KeepAlive:
         p = urllib.parse.urlparse(url)
         self.host, ips = check_url(url)
         self._ips = ips
-        self.port = p.port or (443 if p.scheme == "https" else 80)
+        self.port = p.port or 443   # check_url 已保证 https
         self._conn: _PinnedConnection | None = None
 
     def _ensure(self):
@@ -128,7 +128,8 @@ class _KeepAlive:
             self._conn = conn
         return self._conn
 
-    def get(self, path: str, headers: dict | None = None) -> tuple[int, bytes]:
+    def get(self, path: str, headers: dict | None = None):
+        """返回 (HTTP 状态码, 响应头, 响应体)。4xx/5xx 不复用连接。"""
         for attempt in (1, 2):
             try:
                 conn = self._ensure()
@@ -136,10 +137,9 @@ class _KeepAlive:
                                                    "Accept": "*/*", **(headers or {})})
                 resp = conn.getresponse()
                 body = resp.read()
-                code = resp.status
-                if code >= 400:            # CDN 错误不复用连接
+                if resp.status >= 400:     # CDN 错误不复用连接
                     self._conn = None
-                return code, body
+                return resp.status, resp.headers, body
             except (OSError, http.client.HTTPException):
                 # 连接作废；固定 IP 失效的自愈在 _PinnedConnection.connect 里完成
                 self._conn = None
@@ -161,7 +161,7 @@ class DownloadManager:
         self.store = store
         self.client = client
         self.jobs: dict[str, Job] = {}
-        self._queue: queue.Queue[str] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, Job]] = queue.Queue()
         self._lock = threading.Lock()
         # 启动时清理"幽灵状态"：上次进程退出时仍标记为进行中的场次，恢复为已暂停
         for key, rec in store.sessions.items():
@@ -196,14 +196,10 @@ class DownloadManager:
             meta = self.store.sessions.get(live_key)
             if not meta:
                 return "missing"
-            if not re.fullmatch(r"[0-9A-Za-z]{6,64}", str(live_key)):
-                # live_key 会进入文件系统路径，拒绝一切非纯 ID 形态（纵深防御）
-                self.store.log(f"live_key 格式异常，拒绝下载：{str(live_key)[:24]}", "error")
-                return "missing"
             job = Job(live_key, meta)
             self.jobs[live_key] = job
         self._apply_resume_baseline(job)
-        self._queue.put(live_key)
+        self._queue.put((live_key, job))
         self.store.log(f"加入下载队列：{job.name} {fmt_ts(job.start_time)} {job.title}")
         return "queued"
 
@@ -244,10 +240,9 @@ class DownloadManager:
 
     def _run_loop(self):
         while True:
-            live_key = self._queue.get()
-            job = self.jobs.get(live_key)
-            if job is None:
-                continue
+            live_key, job = self._queue.get()
+            if self.jobs.get(live_key) is not job:
+                continue    # 过期条目：暂停后重建的新任务已取代它，直接丢弃
             if job.stop_event.is_set():   # 排队中已被暂停：直接出队，不再启动
                 self._mark_paused(job)
                 self.store.log(f"已取消排队任务：{job.name} {fmt_ts(job.start_time)}")
@@ -302,12 +297,24 @@ class DownloadManager:
             _merging_tmp(final).unlink(missing_ok=True)   # 上次合并中断的残留
         except OSError:
             pass
+        final_rel = str(final.relative_to(root))
         if final.exists() and final.stat().st_size > 0:
+            # 正常情况是断点/重复下载的跳过；但同日更早的场次可能晚于本场入库、
+            # 令序号重排：若该路径记录在另一会话名下，属于编号冲突，
+            # 拒绝把别人的成品误标为本场完成
+            owner = next((k for k, r in self.store.sessions.items()
+                          if k != job.live_key and r.get("file") == final_rel), None)
+            if owner:
+                msg = (f"{final.name} 已被场次 {owner} 记录，疑似同日序号重排冲突，"
+                       "可开启「文件名附加主播名与开播时间」或删除冲突文件后重试")
+                job.status, job.error = "failed", msg
+                self.store.update_session(job.live_key, status="failed", error=msg)
+                self.store.log(msg, "error")
+                return
             if not s.get("keep_parts"):
                 self._cleanup_parts(parts_dir)   # 之前中断留下的分段一并清掉
             job.status, job.file = "done", str(final)
-            self.store.update_session(job.live_key, status="done",
-                                      file=str(final.relative_to(root)))
+            self.store.update_session(job.live_key, status="done", file=final_rel)
             self.store.log(f"文件已存在，跳过下载：{final}")
             return
         free = shutil.disk_usage(root if root.exists() else Path.home()).free
@@ -466,10 +473,23 @@ class DownloadManager:
             url = pairs[idx][0]
             dest = self._seg_path(parts_dir, idx)
             tmp = dest.with_suffix(".tmp")
-            p = urllib.parse.urlparse(url)
             ka = acquire_ka(url)
             try:
-                code, body = ka.get(p.path + ("?" + p.query if p.query else ""))
+                code, rh, body = 0, None, b""
+                for _hop in range(3):   # 最多跟 2 跳重定向，每一跳都重新过安全校验
+                    p = urllib.parse.urlparse(url)
+                    code, rh, body = ka.get(p.path + ("?" + p.query if p.query else ""))
+                    if code not in (301, 302, 303, 307, 308):
+                        break
+                    loc = rh.get("Location") or ""
+                    if not loc:
+                        raise ApiError(code, f"HTTP {code}")
+                    url = urllib.parse.urljoin(url, loc)
+                    if urllib.parse.urlparse(url).hostname != ka.host:
+                        ka.close()
+                        ka = acquire_ka(url)   # 跨主机：改用目标主机经校验的连接
+                else:
+                    raise ApiError(-2, "重定向次数过多")
                 if code != 200 or not body:
                     raise ApiError(code, f"HTTP {code}")
                 tmp.write_bytes(body)
@@ -509,9 +529,9 @@ class DownloadManager:
         """用本地 HLS 播放列表交给 ffmpeg HLS demuxer 合成，
         时间戳/时长与远端 m3u8 直接读取时一致（concat demuxer 会导致时间戳错乱）。
         先写临时文件、成功后转正，避免失败留下被误判为已完成的半截成品。"""
+        tmp_out = _merging_tmp(final)
         try:
             final.parent.mkdir(parents=True, exist_ok=True)
-            tmp_out = _merging_tmp(final)
             segs = sorted(parts_dir.glob("seg_*.mp4"))
             lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:4"]
             for s in segs:

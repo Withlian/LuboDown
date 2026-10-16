@@ -67,3 +67,4 @@ alarm_info{code, message, is_ban_publish}
 ## 验证工具
 
 程序本体 `app/`（启动方式见 README）。安全层：仅 https、bilibili 域名白名单、解析 IP 须全部为公网、连接固定到已校验 IP（防 DNS rebinding）、重定向逐跳复检。
+已知例外：fake-ip 代理（如 Clash TUN）令系统 DNS 失效时，改用公共 DNS 的明文 HTTP 接口解析真实地址（IP 直连、不走本地 DNS，解析结果仍须全部为公网，最终请求仍受 TLS 证书校验保护）。

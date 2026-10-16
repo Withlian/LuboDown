@@ -11,13 +11,14 @@ const STATUS_TEXT = {
 };
 const ACTIVE_STATES = new Set(["queued", "downloading", "merging"]);
 
-let lastSessionsHash = "";
-let lastLogsSig = "";
 let settingsLoaded = false;
 let pendingRemove = null;   // 两段式删除确认
 let countdownBase = null;
 let listFilter = "all";     // "all" 或主播 uid
 let listSort = "desc";      // desc=时间倒序（最新在前）
+let currentView = [];       // 过滤+排序后的当前视图：列表渲染与删除确认的唯一数据源
+let viewSig = "";           // 设置/调度侧状态签名：变化才重跑设置页、页脚、筛选下拉
+let lastLogsSig = "";
 
 /* ---------- 工具 ---------- */
 function toast(msg, type = "") {
@@ -196,8 +197,8 @@ $("session-list").addEventListener("click", async (ev) => {
     const s = stateCache.sessions.find((x) => x.live_key === key);
     if (pendingRemove !== key) {
       pendingRemove = key;
-      setTimeout(() => { pendingRemove = null; renderSessions(stateCache.sessions); }, 3000);
-      renderSessions(stateCache.sessions);
+      setTimeout(() => { pendingRemove = null; renderSessions(currentView); }, 3000);
+      renderSessions(currentView);
       return;
     }
     pendingRemove = null;
@@ -286,9 +287,9 @@ $("btn-browse").addEventListener("click", async () => {
 });
 $("in-download-dir").addEventListener("change", async (e) => {
   const v = e.target.value.trim();
-  if (!v) return;
   const s = await call("save_settings", { download_dir: v });
-  if (s && s.ok) toast("下载目录已保存", "ok");
+  if (s && s.ok) toast(v ? "下载目录已保存" : "已恢复为默认下载目录", "ok");
+  refresh();
 });
 $("in-ffmpeg").addEventListener("change", async (e) => {
   const r = await call("save_settings", { ffmpeg_path: e.target.value.trim() || "ffmpeg" });
@@ -321,7 +322,7 @@ function unixToInput(ts) {
 }
 
 function syncScheduleControls(s) {
-  const st = stateCache.settings || {};
+  const st = s.settings || {};
   $("sw-auto-check").checked = !!st.auto_check;
   $("auto-check-label").textContent = st.auto_check ? "已启用" : "已关闭";
   $("sw-auto-download").checked = !!st.auto_download;
@@ -419,23 +420,27 @@ async function refresh() {
   if (!s) return;
   stateCache = s;
 
-  // 主播筛选 + 时间排序（仅影响列表展示，不改变数据本身）
+  // 主播筛选 + 时间排序得到当前视图；列表渲染与删除确认都只吃这一份
   let list = s.sessions;
   if (listFilter !== "all") {
     list = list.filter((x) => String(x.uid) === String(listFilter));
   }
-  list = list.slice().sort((a, b) =>
+  currentView = list.slice().sort((a, b) =>
     listSort === "asc" ? a.start_time - b.start_time : b.start_time - a.start_time);
+  renderSessions(currentView);
 
-  const hash = JSON.stringify([list, s.settings.has_sessdata, s.settings.has_bili_jct,
-    s.ffmpeg_ok, s.scheduler.checking, s.scheduler.next_run_ts,
-    s.settings.download_dir, (s.settings.anchors || [])]);
-  if (hash !== lastSessionsHash) {
-    lastSessionsHash = hash;
-    renderSessions(list);
+  // 设置与调度侧状态不变时不碰设置页/页脚/筛选下拉（避免打断交互中的控件）；
+  // 刻意不含下载进度等逐秒变化的字段，进度刷新由 renderSessions 的逐卡 diff 承担
+  const st = s.settings;
+  const sig = JSON.stringify([st.has_sessdata, st.has_bili_jct, st.download_dir,
+    st.ffmpeg_path, st.concurrency, st.keep_parts, st.name_with_anchor,
+    st.auto_check, st.auto_download, st.auto_download_since, st.check_interval_min,
+    st.anchors, s.ffmpeg_ok, s.scheduler.checking, s.scheduler.next_run_ts]);
+  if (sig !== viewSig) {
+    viewSig = sig;
     syncScheduleControls(s);
     renderFoot(s);
-    renderAnchorFilter(s.settings.anchors || []);
+    renderAnchorFilter(st.anchors || []);
     if (settingsLoaded) loadSettingsPage();
   }
   renderLogs(s.logs || []);
@@ -443,9 +448,6 @@ async function refresh() {
 
 function renderAnchorFilter(anchors) {
   const sel = $("sel-anchor-filter");
-  const sig = anchors.map((a) => `${a.uid}|${a.name}`).join(",");
-  if (renderAnchorFilter._sig === sig) return;   // 轮询频繁调用，选项没变不重建（避免打断展开中的下拉）
-  renderAnchorFilter._sig = sig;
   const cur = String(listFilter);
   sel.innerHTML = `<option value="all">全部主播</option>` + anchors.map((a) =>
     `<option value="${a.uid}">${esc(a.name)}</option>`).join("");
@@ -455,13 +457,11 @@ function renderAnchorFilter(anchors) {
 
 $("sel-anchor-filter").addEventListener("change", (e) => {
   listFilter = e.target.value;
-  lastSessionsHash = "";   // 强制重渲染
   refresh();
 });
 $("btn-sort").addEventListener("click", () => {
   listSort = listSort === "desc" ? "asc" : "desc";
   $("btn-sort").textContent = `时间 ${listSort === "desc" ? "↓" : "↑"}`;
-  lastSessionsHash = "";
   refresh();
 });
 

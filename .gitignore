@@ -1,7 +1,6 @@
 # 运行时数据（含账号凭证与个人使用记录，切勿提交）
 config/
 downloads/
-auth/
 *.log
 
 # 构建与发布产物（PyInstaller 中间产物、成品 zip、图标、spec、打包脚本）

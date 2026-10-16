@@ -95,8 +95,9 @@ class Scheduler:
             fetched += 1
             records = [_to_record(uid, name, it) for it in items if it.get("live_key")]
             total += len(records)
-            added += self.store.upsert_sessions(records)
-            self.store.log(f"{name}：共 {len(records)} 场，新增 {added} 场")
+            new_added = self.store.upsert_sessions(records)
+            added += new_added
+            self.store.log(f"{name}：共 {len(records)} 场，新增 {new_added} 场")
             if auto_download:
                 self._auto_download(records)
         if fetched == 0 and last_err is not None:
@@ -144,6 +145,9 @@ class Scheduler:
             if added:
                 self.store.log(f"检查完成，新增 {added} 场")
         finally:
-            interval = float(self.store.settings.get("check_interval_min", 60))
+            try:
+                interval = float(self.store.settings.get("check_interval_min", 60))
+            except (TypeError, ValueError):
+                interval = 60.0   # 配置被手工改坏时不让 checking 永久卡死
             self.next_run = time.time() + interval * 60
             self.checking = False

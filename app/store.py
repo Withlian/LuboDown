@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -34,19 +35,13 @@ DEFAULT_SETTINGS = {
 }
 
 # 会话状态机: new -> queued -> downloading -> merging -> done / failed / paused
-STATUS_TEXT = {
-    "new": "未下载",
-    "queued": "排队中",
-    "downloading": "下载中",
-    "merging": "合成中",
-    "done": "已完成",
-    "failed": "失败",
-    "paused": "已暂停",
-}
-
 # "进行中"状态：进程重启后残留的这些状态恢复为 paused（分段保留、可续传）。
 # 状态判断统一引用此集合，新增状态时只改这里。
 ACTIVE_STATES = frozenset({"queued", "downloading", "merging"})
+
+# live_key 会进入文件系统路径（分段目录 .parts_{key}、成品文件名等），
+# 在入库这道唯一的门上拒收一切非纯 ID 形态，下载/删除/清理等下游路径天然继承该保证。
+VALID_KEY_RE = re.compile(r"[0-9A-Za-z]{6,64}")
 
 
 class Store:
@@ -58,13 +53,8 @@ class Store:
         self.settings = self._load(SETTINGS_FILE, DEFAULT_SETTINGS)
         for k, v in DEFAULT_SETTINGS.items():   # 旧版本配置文件补齐新增字段
             self.settings.setdefault(k, v)
-        # 便携化：下载目录为空 = 跟随程序所在目录；历史遗留的旧安装绝对路径一并归一
-        cur = (self.settings.get("download_dir") or "").strip().strip('"')
-        if not cur or self._is_default_dir(cur):
-            if cur:  # 旧版本写入的绝对路径（等于默认位置）→ 归一为空串并落盘
-                self.settings["download_dir"] = ""
-                self._save(SETTINGS_FILE, self.settings)
-            self.settings["download_dir"] = ""
+        if self._normalize_download_dir():      # 便携化归一，仅在有变化时落盘
+            self._save(SETTINGS_FILE, self.settings)
         self.sessions: dict[str, dict] = self._load(SESSIONS_FILE, {})
         self._normalize_session_files()
         self._logs: list[dict] = []
@@ -75,6 +65,16 @@ class Store:
             return Path(path).resolve() == DEFAULT_DOWNLOAD_DIR.resolve()
         except OSError:
             return False
+
+    def _normalize_download_dir(self) -> bool:
+        """下载目录归一：等于默认位置或为空都存空串（跟随程序目录，便携），
+        并去掉复制路径时夹带的引号。返回归一是否改变了存储值。"""
+        cur = (self.settings.get("download_dir") or "").strip().strip('"')
+        if not cur or self._is_default_dir(cur):
+            cur = ""
+        changed = cur != self.settings.get("download_dir")
+        self.settings["download_dir"] = cur
+        return changed
 
     def download_root(self) -> Path:
         """实际使用的下载根目录（未自定义时跟随程序目录）。"""
@@ -126,11 +126,7 @@ class Store:
             for k, v in patch.items():
                 if k in self.settings:
                     self.settings[k] = v
-            # 下载目录规范化：等于默认位置时存空串（便携），并去掉复制路径带来的引号
-            cur = (self.settings.get("download_dir") or "").strip().strip('"')
-            if not cur or self._is_default_dir(cur):
-                cur = ""
-            self.settings["download_dir"] = cur
+            self._normalize_download_dir()
             self._save(SETTINGS_FILE, self.settings)
 
     def masked_settings(self) -> dict:
@@ -146,11 +142,15 @@ class Store:
 
     # ---------- sessions ----------
     def upsert_sessions(self, items: list[dict]) -> int:
-        """按 live_key 合并场次信息，返回新增数量。"""
+        """按 live_key 合并场次信息，返回新增数量（live_key 形态校验见 VALID_KEY_RE）。"""
         added = 0
         with self._lock:
             for it in items:
-                key = it["live_key"]
+                key = str(it.get("live_key") or "")
+                if not VALID_KEY_RE.fullmatch(key):
+                    if key:
+                        self.log(f"忽略异常 live_key 的场次：{key[:24]}")
+                    continue
                 if key not in self.sessions:
                     it.setdefault("status", "new")
                     self.sessions[key] = it
