@@ -4,11 +4,8 @@ downloads/
 auth/
 *.log
 
-# 构建产物
-build/
-dist/
-build_assets/
-LuboDown.spec
+# 构建与发布产物（PyInstaller 中间产物、成品 zip、图标、spec、打包脚本）
+BuildRelease/
 *.pyc
 __pycache__/
 
