@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import http.client
+import os
 import queue
 import re
 import shutil
@@ -17,8 +18,8 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from .bilibili import ApiError, _PinnedConnection, check_url, refresh_pin, request
-from .store import APP_DIR
+from .bilibili import UA, ApiError, _PinnedConnection, check_url, request
+from .store import ACTIVE_STATES, APP_DIR
 
 TZ8 = timezone(timedelta(hours=8))
 UNSAFE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
@@ -39,6 +40,11 @@ def resolve_ffmpeg(settings: dict) -> str | None:
 def safe_name(text: str, fallback: str = "untitled") -> str:
     text = UNSAFE.sub("_", (text or "").strip()).strip(" ._")
     return text[:60] or fallback
+
+
+def _merging_tmp(final: Path) -> Path:
+    """合成期的临时输出（与成品同目录，成功后 os.replace 原子转正）。"""
+    return final.parent / f".{final.stem}.merging.mp4"
 
 
 def fmt_ts(ts) -> str:
@@ -126,7 +132,7 @@ class _KeepAlive:
         for attempt in (1, 2):
             try:
                 conn = self._ensure()
-                conn.request("GET", path, headers={"User-Agent": "Mozilla/5.0",
+                conn.request("GET", path, headers={"User-Agent": UA,
                                                    "Accept": "*/*", **(headers or {})})
                 resp = conn.getresponse()
                 body = resp.read()
@@ -135,9 +141,9 @@ class _KeepAlive:
                     self._conn = None
                 return code, body
             except (OSError, http.client.HTTPException):
+                # 连接作废；固定 IP 失效的自愈在 _PinnedConnection.connect 里完成
                 self._conn = None
                 if attempt == 2:
-                    refresh_pin(self.host)   # 两次都失败：允许下次重新解析 CDN IP
                     raise
         raise OSError("unreachable")
 
@@ -159,7 +165,7 @@ class DownloadManager:
         self._lock = threading.Lock()
         # 启动时清理"幽灵状态"：上次进程退出时仍标记为进行中的场次，恢复为已暂停
         for key, rec in store.sessions.items():
-            if rec.get("status") in ("queued", "downloading", "merging"):
+            if rec.get("status") in ACTIVE_STATES:
                 store.update_session(key, status="paused", error="程序上次退出时中断，可继续")
         self._runner = threading.Thread(target=self._run_loop, daemon=True)
         self._runner.start()
@@ -180,7 +186,7 @@ class DownloadManager:
     def start(self, live_key: str) -> str:
         with self._lock:
             job = self.jobs.get(live_key)
-            if job and job.status in ("queued", "downloading", "merging"):
+            if job and job.status in ACTIVE_STATES:
                 return job.status
             meta = self.store.sessions.get(live_key)
             if not meta:
@@ -199,7 +205,7 @@ class DownloadManager:
     def cancel(self, live_key: str) -> None:
         with self._lock:
             job = self.jobs.get(live_key)
-        if job and job.status in ("queued", "downloading", "merging"):
+        if job and job.status in ACTIVE_STATES:
             job.stop_event.set()
             # 立即反映到界面与数据库，不等工作线程响应
             job.status, job.error = "paused", "已暂停（可继续）"
@@ -275,10 +281,14 @@ class DownloadManager:
             return
         anchor_dir, final, parts_dir = self._session_dir(job)
         root = self.store.download_root()
+        try:
+            _merging_tmp(final).unlink(missing_ok=True)   # 上次合并中断的残留
+        except OSError:
+            pass
         if final.exists() and final.stat().st_size > 0:
             if not s.get("keep_parts"):
                 self._cleanup_parts(parts_dir)   # 之前中断留下的分段一并清掉
-            job.status, job.file, job.done_segs = "done", str(final), -1
+            job.status, job.file = "done", str(final)
             self.store.update_session(job.live_key, status="done",
                                       file=str(final.relative_to(root)))
             self.store.log(f"文件已存在，跳过下载：{final}")
@@ -417,18 +427,21 @@ class DownloadManager:
                        indexes: list[int]) -> None:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        pool: list[_KeepAlive] = []
+        pool: dict[str, list[_KeepAlive]] = {}   # host -> 空闲连接
         pool_lock = threading.Lock()
 
         def acquire_ka(url: str) -> _KeepAlive:
+            # 只复用同主机的连接：不同 CDN 主机之间的签名路径不通用
+            host = urllib.parse.urlparse(url).hostname or ""
             with pool_lock:
-                if pool:
-                    return pool.pop()
+                bucket = pool.get(host)
+                if bucket:
+                    return bucket.pop()
             return _KeepAlive(url)
 
         def release_ka(ka: _KeepAlive) -> None:
             with pool_lock:
-                pool.append(ka)
+                pool.setdefault(ka.host, []).append(ka)
 
         def fetch_one(idx: int) -> int:
             if job.stop_event.is_set():
@@ -446,7 +459,7 @@ class DownloadManager:
                 tmp.replace(dest)
                 job.bump(len(body))
                 return len(body)
-            except BaseException:
+            except Exception:
                 ka.close()  # 出错的连接不再回池
                 raise
             finally:
@@ -468,8 +481,10 @@ class DownloadManager:
                         break
         finally:
             with pool_lock:
-                while pool:
-                    pool.pop().close()
+                for bucket in pool.values():
+                    for ka in bucket:
+                        ka.close()
+                pool.clear()
 
     # ------------- 合成 -------------
     def _merge(self, parts_dir: Path, final: Path, ffmpeg: str,
@@ -477,10 +492,9 @@ class DownloadManager:
         """用本地 HLS 播放列表交给 ffmpeg HLS demuxer 合成，
         时间戳/时长与远端 m3u8 直接读取时一致（concat demuxer 会导致时间戳错乱）。
         先写临时文件、成功后转正，避免失败留下被误判为已完成的半截成品。"""
-        import os
         try:
             final.parent.mkdir(parents=True, exist_ok=True)
-            tmp_out = final.parent / f".{final.stem}.merging.mp4"
+            tmp_out = _merging_tmp(final)
             segs = sorted(parts_dir.glob("seg_*.mp4"))
             lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:4"]
             for s in segs:

@@ -9,9 +9,10 @@ const STATUS_TEXT = {
   new: "未下载", queued: "排队中", downloading: "下载中", merging: "合成中",
   done: "已完成", failed: "失败", paused: "已暂停",
 };
+const ACTIVE_STATES = new Set(["queued", "downloading", "merging"]);
 
 let lastSessionsHash = "";
-let lastLogCount = -1;
+let lastLogsSig = "";
 let settingsLoaded = false;
 let pendingRemove = null;   // 两段式删除确认
 let countdownBase = null;
@@ -81,18 +82,19 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
 /* ---------- 场次列表 ---------- */
 function sessActions(s) {
   const st = s.status;
+  const key = esc(s.live_key);
   let html = "";
   if (st === "done") {
-    html += `<button class="btn small" data-act="open" data-key="${s.live_key}">打开文件</button>`;
-  } else if (st === "downloading" || st === "queued" || st === "merging") {
-    html += `<button class="btn small" data-act="pause" data-key="${s.live_key}">暂停</button>`;
+    html += `<button class="btn small" data-act="open" data-key="${key}">打开文件</button>`;
+  } else if (ACTIVE_STATES.has(st)) {
+    html += `<button class="btn small" data-act="pause" data-key="${key}">暂停</button>`;
   } else if (st === "paused" || st === "failed") {
-    html += `<button class="btn small primary" data-act="start" data-key="${s.live_key}">${st === "paused" ? "继续" : "重试"}</button>`;
+    html += `<button class="btn small primary" data-act="start" data-key="${key}">${st === "paused" ? "继续" : "重试"}</button>`;
   } else {
-    html += `<button class="btn small primary" data-act="start" data-key="${s.live_key}">下载</button>`;
+    html += `<button class="btn small primary" data-act="start" data-key="${key}">下载</button>`;
   }
   const label = pendingRemove === s.live_key ? "确认删除?" : "删除";
-  html += `<button class="btn small danger" data-act="remove" data-key="${s.live_key}">${label}</button>`;
+  html += `<button class="btn small danger" data-act="remove" data-key="${key}">${label}</button>`;
   return html;
 }
 
@@ -112,11 +114,11 @@ function sessCard(s) {
   const dur = fmtDur(s.duration || (s.end_time > s.start_time ? s.end_time - s.start_time : 0));
   const alert = s.alert_message ? `<div class="sess-alert" title="${esc(s.alert_message)}">⚠ ${esc(s.alert_message)}</div>` : "";
   const err = s.error ? `<div class="sess-alert" title="${esc(s.error)}">✖ ${esc(s.error)}</div>` : "";
-  const liveJob = ["downloading", "merging", "queued"].includes(s.status) && s.total_segs;
+  const liveJob = ACTIVE_STATES.has(s.status) && s.total_segs;
   const cover = s.cover
     ? `<img class="cover" src="${esc(s.cover)}" referrerpolicy="no-referrer" onerror="this.removeAttribute('src')">`
     : `<div class="cover"></div>`;
-  return `<div class="sess" data-key="${s.live_key}">
+  return `<div class="sess" data-key="${esc(s.live_key)}">
     ${cover}
     <div class="sess-info">
       <div class="sess-title">
@@ -159,7 +161,7 @@ function renderSessions(sessions) {
         html += `<div class="date-head">${d}</div>`;
         lastDate = d;
       }
-      html += `<div data-slot="${s.live_key}"></div>`;
+      html += `<div data-slot="${esc(s.live_key)}"></div>`;
     }
     box.innerHTML = html;
     box.dataset.mode = "list";
@@ -170,7 +172,7 @@ function renderSessions(sessions) {
   for (const s of sessions) {
     const h = sessCard(s);
     if (renderedCards[s.live_key] !== h) {
-      const slot = box.querySelector(`[data-slot="${s.live_key}"]`);
+      const slot = box.querySelector(`[data-slot="${CSS.escape(s.live_key)}"]`);
       if (slot) slot.innerHTML = h;
       renderedCards[s.live_key] = h;
     }
@@ -374,8 +376,12 @@ $("sel-interval").addEventListener("change", async (e) => {
 
 /* ---------- 日志 ---------- */
 function renderLogs(logs) {
-  if (logs.length === lastLogCount) return;
-  lastLogCount = logs.length;
+  // 用内容签名而不是长度判断：日志环饱和后返回的长度不再变化
+  const sig = logs.length
+    ? `${logs.length}|${logs[0].t}|${logs[logs.length - 1].t}|${logs[logs.length - 1].level}|${logs[logs.length - 1].msg}`
+    : "0";
+  if (sig === lastLogsSig) return;
+  lastLogsSig = sig;
   const box = $("log-box");
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   box.innerHTML = logs.map((l) =>
@@ -438,6 +444,9 @@ async function refresh() {
 
 function renderAnchorFilter(anchors) {
   const sel = $("sel-anchor-filter");
+  const sig = anchors.map((a) => `${a.uid}|${a.name}`).join(",");
+  if (renderAnchorFilter._sig === sig) return;   // 轮询频繁调用，选项没变不重建（避免打断展开中的下拉）
+  renderAnchorFilter._sig = sig;
   const cur = String(listFilter);
   sel.innerHTML = `<option value="all">全部主播</option>` + anchors.map((a) =>
     `<option value="${a.uid}">${esc(a.name)}</option>`).join("");

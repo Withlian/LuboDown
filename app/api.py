@@ -9,6 +9,12 @@ from pathlib import Path
 
 from .downloader import resolve_ffmpeg, safe_name
 
+# 数值设置的合法区间（前端下拉只提供其中常用档位）
+SETTING_RANGES = {
+    "check_interval_min": (5, 10_080),   # 定时检查间隔（分钟）
+    "concurrency": (1, 16),              # 分段下载并发数
+}
+
 
 class Api:
     def __init__(self, store, client, manager, scheduler):
@@ -34,11 +40,6 @@ class Api:
                     "status", "error", "total_segs", "done_segs", "done_bytes",
                     "total_bytes", "speed_bps", "percent")})
                 view["file"] = jv["file"]
-            elif rec.get("status") in ("queued", "downloading", "merging"):
-                # 没有对应任务却标着进行中：进程中断等留下的残留，纠正为已暂停
-                view["status"] = "paused"
-                self._store.update_session(rec["live_key"], status="paused",
-                                           error="程序中断，可继续")
             sessions.append(view)
         return {
             "settings": self._store.masked_settings(),
@@ -60,11 +61,10 @@ class Api:
             v = (patch.get(key) or "").strip()
             if v:
                 clean[key] = v
-        for key in ("check_interval_min", "concurrency"):
+        for key, (lo, hi) in SETTING_RANGES.items():
             try:
                 if patch.get(key) is not None:
-                    clean[key] = max(5, int(patch[key])) if key == "check_interval_min" \
-                        else min(16, max(1, int(patch[key])))
+                    clean[key] = min(hi, max(lo, int(patch[key])))
             except (TypeError, ValueError):
                 pass
         for key in ("auto_check", "auto_download", "keep_parts", "name_with_anchor"):
@@ -151,26 +151,15 @@ class Api:
 
     def refresh_list(self) -> dict:
         """仅刷新列表，不触发自动下载。"""
+        if not self._store.settings.get("sessdata"):
+            return {"ok": False, "message": "请先在设置中填写 SESSDATA"}
         try:
-            if not self._store.settings.get("sessdata"):
-                return {"ok": False, "message": "请先在设置中填写 SESSDATA"}
-            total = added = 0
-            for anchor in self._store.settings.get("anchors", []):
-                try:
-                    uid = int(anchor["uid"])
-                    name = anchor.get("name") or str(uid)
-                except (KeyError, TypeError, ValueError):
-                    continue
-                items = self._client.fetch_all_replays(uid)
-                from .scheduler import _to_record
-                records = [_to_record(uid, name, it) for it in items if it.get("live_key")]
-                total += len(records)
-                added += self._store.upsert_sessions(records)
-            self._store.log(f"手动刷新完成：{total} 场，新增 {added} 场")
-            return {"ok": True, "total": total, "added": added}
+            total, added = self._scheduler.run_check()
         except Exception as e:
             self._store.log(f"刷新失败：{e}", "error")
             return {"ok": False, "message": str(e)}
+        self._store.log(f"手动刷新完成：{total} 场，新增 {added} 场")
+        return {"ok": True, "total": total, "added": added}
 
     def start_download(self, live_key: str) -> dict:
         status = self._manager.start(live_key)

@@ -50,7 +50,7 @@ def _doh_resolve(host: str) -> list[str]:
             ips = [a["data"] for a in answer if isinstance(a, dict) and a.get("type") == 1]
             if ips:
                 return ips
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, ValueError):  # 含 JSONDecodeError
             continue
     return []
 
@@ -94,9 +94,17 @@ class _PinnedConnection(http.client.HTTPSConnection):
         super().__init__(host, **kw)
         self._ips = ips or []
 
+    def _candidate_ips(self):
+        """先试已固定的 IP；全部连不上才视为解析结果失效，
+        清缓存重新解析一轮再试（站点换 IP、TUN 代理环境变化后的自愈路径，
+        opener 与 KeepAlive 两条传输共用）。"""
+        yield from self._ips
+        refresh_pin(self.host)
+        yield from _resolve_global(self.host)
+
     def connect(self):
         err: OSError | None = None
-        for ip in self._ips:
+        for ip in self._candidate_ips():
             try:
                 self.sock = socket.create_connection((ip, self.port), timeout=self.timeout)
                 break

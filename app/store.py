@@ -33,7 +33,7 @@ DEFAULT_SETTINGS = {
     "ffmpeg_path": "ffmpeg",        # ffmpeg 可执行文件
 }
 
-# 会话状态机: new -> downloading -> merging -> done / failed / paused
+# 会话状态机: new -> queued -> downloading -> merging -> done / failed / paused
 STATUS_TEXT = {
     "new": "未下载",
     "queued": "排队中",
@@ -43,6 +43,10 @@ STATUS_TEXT = {
     "failed": "失败",
     "paused": "已暂停",
 }
+
+# "进行中"状态：进程重启后残留的这些状态恢复为 paused（分段保留、可续传）。
+# 状态判断统一引用此集合，新增状态时只改这里。
+ACTIVE_STATES = frozenset({"queued", "downloading", "merging"})
 
 
 class Store:
@@ -176,18 +180,18 @@ class Store:
     # ---------- logs ----------
     def log(self, msg: str, level: str = "info") -> None:
         entry = {"t": time.strftime("%m-%d %H:%M:%S"), "level": level, "msg": msg}
+        line = f"[{entry['t']}] [{level}] {msg}\n"
         with self._lock:
             self._logs.append(entry)
             self._logs = self._logs[-300:]
-        line = f"[{entry['t']}] [{level}] {msg}\n"
-        try:
-            if LOG_FILE.exists() and LOG_FILE.stat().st_size > 5 * 1024 * 1024:
-                lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
-                LOG_FILE.write_text("\n".join(lines[-2000:]) + "\n", encoding="utf-8")
-            with open(LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(line)
-        except OSError:
-            pass
+            try:
+                if LOG_FILE.exists() and LOG_FILE.stat().st_size > 5 * 1024 * 1024:
+                    lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+                    LOG_FILE.write_text("\n".join(lines[-2000:]) + "\n", encoding="utf-8")
+                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write(line)
+            except OSError:
+                pass
         if sys.stdout is not None:  # pythonw 下无控制台，stdout 为 None
             try:
                 print(line, end="")
