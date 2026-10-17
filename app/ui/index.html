@@ -4,41 +4,98 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LuboDown · B站直播回放下载</title>
+<script>
+  /* 首帧前确定主题，避免闪烁：本地偏好 > 系统设置 */
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("lubo-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") {
+      t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<!-- 图标（lucide，内联以便离线使用） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/><path d="m16 12 5 3-5 3v-6Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  </defs>
+</svg>
+
 <div id="app">
   <!-- ============ 侧边栏 ============ -->
   <aside class="sidebar">
     <div class="logo">
-      <div class="logo-icon">录</div>
+      <div class="logo-icon"><svg class="ico"><use href="#i-arrow-down"/></svg></div>
       <div>
         <div class="logo-name">LuboDown</div>
         <div class="logo-sub">B站直播回放下载</div>
       </div>
     </div>
 
-    <nav>
+    <div class="nav-title">导航</div>
+    <nav id="nav">
+      <span class="nav-pill" id="nav-pill"></span>
       <button class="nav-item active" data-page="sessions">
-        <span class="nav-ico">▸</span> 回放列表
+        <svg class="ico"><use href="#i-list"/></svg><span>回放列表</span>
       </button>
       <button class="nav-item" data-page="schedule">
-        <span class="nav-ico">◷</span> 定时任务
+        <svg class="ico"><use href="#i-clock"/></svg><span>定时任务</span>
       </button>
       <button class="nav-item" data-page="settings">
-        <span class="nav-ico">⚙</span> 设置
+        <svg class="ico"><use href="#i-settings"/></svg><span>设置</span>
       </button>
     </nav>
 
     <div class="sidebar-foot">
+      <div class="nav-title">状态</div>
       <div class="foot-row"><span class="dot" id="dot-cookie"></span><span id="foot-cookie">Cookie 未配置</span></div>
       <div class="foot-row"><span class="dot" id="dot-ffmpeg"></span><span id="foot-ffmpeg">ffmpeg 检测中…</span></div>
-      <div class="foot-tip">关闭窗口即最小化到托盘</div>
+      <div class="foot-bottom">
+        <span class="foot-tip">关闭窗口即最小化到托盘</span>
+        <button class="icon-btn" id="btn-theme" title="切换亮色/暗色">
+          <svg class="ico ico-sun"><use href="#i-sun"/></svg>
+          <svg class="ico ico-moon"><use href="#i-moon"/></svg>
+        </button>
+      </div>
     </div>
   </aside>
 
   <!-- ============ 主区域 ============ -->
-  <main class="main">
+  <main class="main" id="main">
     <!-- 回放列表页 -->
     <section id="page-sessions" class="page active">
       <header class="page-head">
@@ -47,12 +104,36 @@
           <p class="sub">仅保留最近约 14 天的回放，建议开启定时自动下载</p>
         </div>
         <div class="head-actions">
-          <select id="sel-anchor-filter" title="按主播筛选"></select>
-          <button class="btn ghost" id="btn-sort" title="切换排序">时间 ↓</button>
-          <button class="btn ghost" id="btn-refresh">↻ 刷新列表</button>
-          <button class="btn primary" id="btn-check">立即检查新回放</button>
+          <div class="select-wrap"><select id="sel-anchor-filter" title="按主播筛选"></select></div>
+          <button class="btn ghost" id="btn-sort" title="切换排序"><svg class="ico"><use href="#i-sort"/></svg><span>时间 ↓</span></button>
+          <button class="btn secondary" id="btn-refresh"><svg class="ico"><use href="#i-refresh"/></svg><span>刷新列表</span></button>
+          <button class="btn primary" id="btn-check"><svg class="ico"><use href="#i-search"/></svg><span>立即检查新回放</span></button>
         </div>
       </header>
+
+      <div class="metrics">
+        <div class="card metric">
+          <div class="metric-top"><span>全部场次</span><svg class="ico accent"><use href="#i-video"/></svg></div>
+          <div class="metric-val" id="stat-total">0</div>
+          <div class="metric-sub">近 14 天回放</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-top"><span>进行中</span><svg class="ico accent"><use href="#i-activity"/></svg></div>
+          <div class="metric-val" id="stat-active">0</div>
+          <div class="metric-sub" id="stat-active-sub">排队 / 下载 / 合成</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-top"><span>已完成</span><svg class="ico success"><use href="#i-check"/></svg></div>
+          <div class="metric-val" id="stat-done">0</div>
+          <div class="metric-sub success">已保存到本地</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-top"><span>待处理</span><svg class="ico warning"><use href="#i-alert"/></svg></div>
+          <div class="metric-val" id="stat-pending">0</div>
+          <div class="metric-sub" id="stat-pending-sub">未下载 / 暂停 / 失败</div>
+        </div>
+      </div>
+
       <div id="session-list" class="session-list">
         <div class="empty">加载中…</div>
       </div>
@@ -66,7 +147,10 @@
 
       <div class="grid-2">
         <div class="card">
-          <div class="card-title">定时检查</div>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-clock"/></svg></span>
+            <div class="card-title">定时检查</div>
+          </div>
           <p class="desc">每间隔指定时间自动拉取回放列表，发现新场次记入列表。</p>
           <div class="row">
             <label class="switch">
@@ -76,26 +160,33 @@
             <span id="auto-check-label" class="row-label">已启用</span>
           </div>
           <div class="row">
-            <span class="row-label">检查间隔</span>
-            <select id="sel-interval">
-              <option value="15">每 15 分钟</option>
-              <option value="30">每 30 分钟</option>
-              <option value="60" selected>每 1 小时</option>
-              <option value="120">每 2 小时</option>
-              <option value="360">每 6 小时</option>
-              <option value="720">每 12 小时</option>
-              <option value="1440">每 24 小时</option>
-            </select>
+            <span class="row-label fixed">检查间隔</span>
+            <div class="select-wrap">
+              <select id="sel-interval">
+                <option value="15">每 15 分钟</option>
+                <option value="30">每 30 分钟</option>
+                <option value="60" selected>每 1 小时</option>
+                <option value="120">每 2 小时</option>
+                <option value="360">每 6 小时</option>
+                <option value="720">每 12 小时</option>
+                <option value="1440">每 24 小时</option>
+              </select>
+            </div>
           </div>
           <div class="row">
-            <span class="row-label">下次检查</span>
-            <span class="mono" id="next-run">—</span>
+            <span class="row-label fixed">下次检查</span>
+            <span class="mono next-run" id="next-run">—</span>
           </div>
-          <button class="btn primary" id="btn-check-2">立即检查</button>
+          <div class="card-foot">
+            <button class="btn primary" id="btn-check-2"><svg class="ico"><use href="#i-search"/></svg><span>立即检查</span></button>
+          </div>
         </div>
 
         <div class="card">
-          <div class="card-title">自动下载</div>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-zap"/></svg></span>
+            <div class="card-title">自动下载</div>
+          </div>
           <p class="desc">检查到<b>新场次</b>且录像已生成时，自动开始下载（切片流并发下载后由 ffmpeg 无损合成，约 20GB/4.5 小时场）。</p>
           <div class="row">
             <label class="switch">
@@ -105,18 +196,22 @@
             <span id="auto-download-label" class="row-label">已关闭</span>
           </div>
           <div class="row">
-            <span class="row-label">起始时间</span>
+            <span class="row-label fixed">起始时间</span>
             <input type="datetime-local" id="in-since">
             <button class="btn small ghost" id="btn-clear-since">清除</button>
           </div>
-          <p class="desc" style="margin-top:10px">仅自动下载该时间<b>之后开播</b>的场次，更早的场次只进列表、可手动下载。
-             首次开启自动下载前建议先设置，否则会下载当前列表里所有未下载场次。</p>
-          <p class="desc">任务队列串行下载；磁盘剩余空间不足 3GB 时会先提示。</p>
+          <div class="note">
+            <svg class="ico"><use href="#i-info"/></svg>
+            <p>仅自动下载该时间<b>之后开播</b>的场次，更早的场次只进列表、可手动下载。首次开启自动下载前建议先设置，否则会下载当前列表里所有未下载场次。任务队列串行下载；磁盘剩余空间不足 3GB 时会先提示。</p>
+          </div>
         </div>
       </div>
 
       <div class="card log-card">
-        <div class="card-title">运行日志</div>
+        <div class="card-head">
+          <span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span>
+          <div class="card-title">运行日志</div>
+        </div>
         <div id="log-box" class="log-box"></div>
       </div>
     </section>
@@ -129,56 +224,67 @@
 
       <div class="grid-2">
         <div class="card">
-          <div class="card-title">B站凭证</div>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-key"/></svg></span>
+            <div class="card-title">B站凭证</div>
+          </div>
           <p class="desc">浏览器登录 B 站后，F12 → 应用/Application → Cookie → 找到
             <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；随时回来更新即可。</p>
           <label class="field">
             <span>SESSDATA</span>
             <div class="pw-wrap">
               <input type="password" id="in-sessdata" placeholder="" autocomplete="off">
-              <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏">👁</button>
+              <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
             </div>
           </label>
           <label class="field">
             <span>bili_jct</span>
             <div class="pw-wrap">
               <input type="password" id="in-bili-jct" placeholder="" autocomplete="off">
-              <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏">👁</button>
+              <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
             </div>
           </label>
           <div class="row gap">
             <button class="btn primary" id="btn-save-cred">保存凭证</button>
-            <button class="btn ghost" id="btn-verify">检测有效性</button>
+            <button class="btn secondary" id="btn-verify">检测有效性</button>
             <span id="verify-result" class="hint"></span>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title">关注的主播</div>
-          <p class="desc">需要该主播给你的账号开通「回放剪辑权限」，否则无法获取其回放。</p>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-user"/></svg></span>
+            <div class="card-title">关注的主播</div>
+          </div>
+          <p class="desc">需要该主播为你的账号开通回放剪辑权限，否则无法获取其回放。</p>
           <div id="anchor-list" class="anchor-list"></div>
           <div class="row gap">
             <input type="text" id="in-uid" placeholder="输入主播 UID（space.bilibili.com 后的数字）" class="grow">
-            <button class="btn primary" id="btn-add-anchor">添加</button>
+            <button class="btn primary" id="btn-add-anchor"><svg class="ico"><use href="#i-plus"/></svg><span>添加</span></button>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title">下载</div>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-drive"/></svg></span>
+            <div class="card-title">下载</div>
+          </div>
           <p class="desc">以下设置修改后<b>立即自动保存</b>。</p>
           <label class="field">
             <span>下载目录</span>
-            <div class="row gap">
+            <div class="row tight">
               <input type="text" id="in-download-dir" class="grow" autocomplete="off">
-              <button class="btn ghost" id="btn-browse">浏览</button>
+              <button class="btn secondary" id="btn-browse"><svg class="ico"><use href="#i-folder"/></svg><span>浏览</span></button>
             </div>
           </label>
           <div class="row">
-            <span class="row-label">分段并发数</span>
-            <select id="sel-concurrency">
-              <option>1</option><option>2</option><option>4</option>
-              <option selected>6</option><option>8</option><option>12</option><option>16</option>
-            </select>
+            <span class="row-label fixed">分段并发数</span>
+            <div class="select-wrap">
+              <select id="sel-concurrency">
+                <option>1</option><option>2</option><option>4</option>
+                <option selected>6</option><option>8</option><option>12</option><option>16</option>
+              </select>
+            </div>
           </div>
           <div class="row">
             <label class="switch">
@@ -197,7 +303,10 @@
         </div>
 
         <div class="card">
-          <div class="card-title">ffmpeg</div>
+          <div class="card-head">
+            <span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span>
+            <div class="card-title">ffmpeg</div>
+          </div>
           <p class="desc">用于把分段无损合成为 MP4。默认使用项目内置的 <code>bin/ffmpeg.exe</code>，无需配置；也可指定其他路径（修改后自动保存）。</p>
           <label class="field">
             <span>可执行文件路径或命令名</span>

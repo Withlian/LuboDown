@@ -20,13 +20,24 @@ let viewSig = "";           // 设置/调度侧状态签名：变化才重跑设
 let lastLogsSig = "";
 
 /* ---------- 工具 ---------- */
+function ico(name) {
+  return `<svg class="ico"><use href="#i-${name}"/></svg>`;
+}
+
+const TOAST_ICON = { ok: "check", err: "alert" };
 function toast(msg, type = "") {
   const el = document.createElement("div");
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  el.innerHTML = ico(TOAST_ICON[type] || "info");
+  const text = document.createElement("span");
+  text.textContent = msg;
+  el.appendChild(text);
   $("toasts").appendChild(el);
-  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s"; }, 2600);
-  setTimeout(() => el.remove(), 3000);
+  setTimeout(() => {
+    el.classList.add("leaving");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 600);   // 动画被禁用时的兜底
+  }, 2800);
 }
 
 function call(name, ...args) {
@@ -69,15 +80,52 @@ function esc(s) {
 }
 
 /* ---------- 页面切换 ---------- */
+function moveNavPill(instant = false) {
+  const pill = $("nav-pill");
+  const active = document.querySelector(".nav-item.active");
+  if (!pill || !active) return;
+  if (instant) pill.style.transition = "none";
+  pill.style.transform = `translateY(${active.offsetTop}px)`;
+  if (instant) { void pill.offsetHeight; pill.style.transition = ""; }
+}
+
 document.querySelectorAll(".nav-item").forEach((btn) => {
   btn.addEventListener("click", () => {
+    if (btn.classList.contains("active")) return;
     document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
     $("page-" + btn.dataset.page).classList.add("active");
+    $("main").scrollTop = 0;
+    moveNavPill();
     if (btn.dataset.page === "settings") loadSettingsPage();
   });
 });
+moveNavPill(true);
+
+/* ---------- 主题 ---------- */
+function savedTheme() {
+  try { return localStorage.getItem("lubo-theme"); } catch (e) { return null; }
+}
+function applyTheme(theme, animate = true) {
+  const root = document.documentElement;
+  if (root.dataset.theme === theme) return;
+  if (animate) {
+    root.classList.add("theme-anim");
+    setTimeout(() => root.classList.remove("theme-anim"), 400);
+  }
+  root.dataset.theme = theme;
+}
+$("btn-theme").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try { localStorage.setItem("lubo-theme", next); } catch (e) { /* 存不了就只对本次生效 */ }
+});
+if (window.matchMedia) {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+    if (!savedTheme()) applyTheme(e.matches ? "dark" : "light");   // 未手动选择时跟随系统
+  });
+}
 
 /* ---------- 场次列表 ---------- */
 function sessActions(s) {
@@ -85,47 +133,64 @@ function sessActions(s) {
   const key = esc(s.live_key);
   let html = "";
   if (st === "done") {
-    html += `<button class="btn small" data-act="open" data-key="${key}">打开文件</button>`;
+    html += `<button class="btn small secondary" data-act="open" data-key="${key}">${ico("folder-open")}打开文件</button>`;
   } else if (ACTIVE_STATES.has(st)) {
-    html += `<button class="btn small" data-act="pause" data-key="${key}">暂停</button>`;
+    html += `<button class="btn small" data-act="pause" data-key="${key}">${ico("pause")}暂停</button>`;
   } else if (st === "paused" || st === "failed") {
-    html += `<button class="btn small primary" data-act="start" data-key="${key}">${st === "paused" ? "继续" : "重试"}</button>`;
+    html += st === "paused"
+      ? `<button class="btn small primary" data-act="start" data-key="${key}">${ico("play")}继续</button>`
+      : `<button class="btn small primary" data-act="start" data-key="${key}">${ico("retry")}重试</button>`;
   } else {
-    html += `<button class="btn small primary" data-act="start" data-key="${key}">下载</button>`;
+    html += `<button class="btn small primary" data-act="start" data-key="${key}">${ico("download")}下载</button>`;
   }
   // 已完成的会话确认后会连视频文件一起删，文案必须点明
-  const label = pendingRemove === s.live_key
-    ? (st === "done" ? "确认删除文件?" : "确认删除?")
-    : "删除";
-  html += `<button class="btn small danger" data-act="remove" data-key="${key}">${label}</button>`;
+  const confirming = pendingRemove === s.live_key;
+  const label = confirming ? (st === "done" ? "确认删除文件?" : "确认删除?") : "删除";
+  html += `<button class="btn small danger${confirming ? " confirming" : ""}" data-act="remove" data-key="${key}">${ico("trash")}${label}</button>`;
   return html;
 }
 
-function progressHtml(jv) {
-  const pct = jv.percent || 0;
+function progressTexts(jv) {
   const est = jv.total_bytes ? ` / 约 ${fmtBytes(jv.total_bytes)}` : "";
+  return [`${jv.done_segs} / ${jv.total_segs} 段 · ${fmtBytes(jv.done_bytes)}${est}`,
+          `${+(jv.percent || 0).toFixed(1)}%${jv.speed_bps ? " · " + fmtSpeed(jv.speed_bps) : ""}`];
+}
+
+// 进度条初始为 0，插入后由 patchProgress 设到实际值，借 transform 过渡平滑推进
+function progressHtml(jv) {
+  const [left, right] = progressTexts(jv);
   return `<div class="progress-wrap">
-    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-    <div class="progress-text">
-      <span>${jv.done_segs} / ${jv.total_segs} 段 · ${fmtBytes(jv.done_bytes)}${est}</span>
-      <span>${pct}% · ${fmtSpeed(jv.speed_bps)}</span>
-    </div>
+    <div class="progress-bar"><div class="progress-fill${jv.status === "merging" ? " merging" : ""}"></div></div>
+    <div class="progress-text"><span>${left}</span><span>${right}</span></div>
   </div>`;
+}
+
+function patchProgress(slot, s) {
+  const fill = slot.querySelector(".progress-fill");
+  if (!fill) return;
+  fill.style.transform = `scaleX(${Math.min(100, s.percent || 0) / 100})`;
+  const spans = slot.querySelectorAll(".progress-text span");
+  const texts = progressTexts(s);
+  spans.forEach((sp, i) => { if (sp.textContent !== texts[i]) sp.textContent = texts[i]; });
 }
 
 function sessCard(s) {
   const dur = fmtDur(s.duration || (s.end_time > s.start_time ? s.end_time - s.start_time : 0));
-  const err = s.error ? `<div class="sess-alert" title="${esc(s.error)}">✖ ${esc(s.error)}</div>` : "";
+  // 只有失败才是错误；暂停、中断等是提示信息，用中性色
+  const failed = s.status === "failed";
+  const err = s.error
+    ? `<div class="sess-alert${failed ? "" : " soft"}" title="${esc(s.error)}">${ico(failed ? "alert" : "info")}<span>${esc(s.error)}</span></div>`
+    : "";
   const liveJob = ACTIVE_STATES.has(s.status) && s.total_segs;
   const cover = s.cover
     ? `<img class="cover" src="${esc(s.cover)}" referrerpolicy="no-referrer" onerror="this.removeAttribute('src')">`
-    : `<div class="cover"></div>`;
+    : `<div class="cover">${ico("video")}</div>`;
   return `<div class="sess" data-key="${esc(s.live_key)}">
     ${cover}
     <div class="sess-info">
       <div class="sess-title">
-        <span class="badge ${s.status}">${STATUS_TEXT[s.status] || s.status}</span>
-        ${esc(s.title || "未命名直播")}
+        <span class="badge ${esc(s.status)}">${esc(STATUS_TEXT[s.status] || s.status)}</span>
+        <span class="sess-title-text">${esc(s.title || "未命名直播")}</span>
       </div>
       <div class="sess-meta">
         <span class="sess-anchor">${esc(s.name || s.uid)}</span>
@@ -139,44 +204,53 @@ function sessCard(s) {
   </div>`;
 }
 
-let renderedCards = {};   // live_key -> 已渲染卡片 HTML
+let renderedCards = {};   // live_key -> 已渲染卡片的结构签名（不含进度数值）
+
+const PROGRESS_FIELDS = { done_segs: 0, done_bytes: 0, total_bytes: 0, speed_bps: 0, percent: 0 };
 
 function renderSessions(sessions) {
   const box = $("session-list");
   if (!sessions.length) {
     if (box.dataset.mode !== "empty") {
-      box.innerHTML = `<div class="empty">暂无回放数据，点击「立即检查新回放」拉取</div>`;
+      box.innerHTML = `<div class="empty"><div class="empty-ico">${ico("inbox")}</div>
+        <div>暂无回放数据，点击右上角按钮检查新回放</div></div>`;
       box.dataset.mode = "empty";
       renderedCards = {};
       renderSessions._sig = "";
     }
     return;
   }
-  // 骨架（日期分组 + 卡片占位）仅在结构变化时重建
+  // 骨架（日期分组 + 卡片占位）仅在结构变化时重建；重建时逐项错峰入场
   const sig = sessions.map((s) => s.live_key).join(",")
     + "|" + sessions.map((s) => fmtDate(s.start_time)).join(",");
   if (renderSessions._sig !== sig) {
-    let html = "", lastDate = "";
+    let html = "", lastDate = "", n = 0;
     for (const s of sessions) {
       const d = fmtDate(s.start_time);
       if (d !== lastDate) {
-        html += `<div class="date-head">${d}</div>`;
+        html += `<div class="date-head" style="--i:${Math.min(n++, 12)}">${ico("calendar")}${d}</div>`;
         lastDate = d;
       }
-      html += `<div data-slot="${esc(s.live_key)}"></div>`;
+      html += `<div data-slot="${esc(s.live_key)}" style="--i:${Math.min(n++, 12)}"></div>`;
     }
     box.innerHTML = html;
     box.dataset.mode = "list";
     renderSessions._sig = sig;
     renderedCards = {};
   }
-  // 每张卡片只在其内容变化时整体替换（进度更新不打扰其他卡片）
+  // 卡片结构变化才整体替换；仅进度变化时原地更新，进度条过渡不被打断
   for (const s of sessions) {
-    const h = sessCard(s);
-    if (renderedCards[s.live_key] !== h) {
-      const slot = box.querySelector(`[data-slot="${CSS.escape(s.live_key)}"]`);
-      if (slot) slot.innerHTML = h;
-      renderedCards[s.live_key] = h;
+    const slot = box.querySelector(`[data-slot="${CSS.escape(s.live_key)}"]`);
+    if (!slot) continue;
+    const structure = sessCard({ ...s, ...PROGRESS_FIELDS });
+    if (renderedCards[s.live_key] !== structure) {
+      slot.innerHTML = sessCard(s);
+      renderedCards[s.live_key] = structure;
+      if (slot.querySelector(".progress-fill")) {
+        requestAnimationFrame(() => requestAnimationFrame(() => patchProgress(slot, s)));
+      }
+    } else {
+      patchProgress(slot, s);
     }
   }
 }
@@ -232,8 +306,8 @@ function loadSettingsPage() {
 
 function renderAnchors(anchors) {
   $("anchor-list").innerHTML = anchors.map((a) =>
-    `<span class="anchor-chip">${esc(a.name)}<span style="color:var(--muted);font-size:11px">${a.uid}</span>
-     <button data-uid="${a.uid}" title="移除">✕</button></span>`).join("")
+    `<span class="anchor-chip">${esc(a.name)}<span class="chip-uid">${esc(a.uid)}</span>
+     <button data-uid="${esc(a.uid)}" title="移除">${ico("x")}</button></span>`).join("")
     || `<span class="hint">尚未添加主播</span>`;
 }
 $("anchor-list").addEventListener("click", async (ev) => {
@@ -430,6 +504,7 @@ async function refresh() {
   currentView = list.slice().sort((a, b) =>
     listSort === "asc" ? a.start_time - b.start_time : b.start_time - a.start_time);
   renderSessions(currentView);
+  renderStats(s.sessions);
 
   // 设置与调度侧状态不变时不碰设置页/页脚/筛选下拉（避免打断交互中的控件）；
   // 刻意不含下载进度等逐秒变化的字段，进度刷新由 renderSessions 的逐卡 diff 承担
@@ -448,6 +523,37 @@ async function refresh() {
   renderLogs(s.logs || []);
 }
 
+/* ---------- 统计卡 ---------- */
+function setText(id, text, bump = false) {
+  const el = $(id);
+  if (el.textContent === text) return;
+  el.textContent = text;
+  if (bump) {   // 数值变化时轻跳一下：先移除再强制回流，保证动画可重复触发
+    el.classList.remove("bump");
+    void el.offsetWidth;
+    el.classList.add("bump");
+  }
+}
+
+function renderStats(sessions) {
+  const count = { new: 0, queued: 0, downloading: 0, merging: 0, done: 0, failed: 0, paused: 0 };
+  for (const x of sessions) if (x.status in count) count[x.status]++;
+  const active = count.queued + count.downloading + count.merging;
+  const pending = count.new + count.paused + count.failed;
+  setText("stat-total", String(sessions.length), true);
+  setText("stat-active", String(active), true);
+  setText("stat-done", String(count.done), true);
+  setText("stat-pending", String(pending), true);
+  setText("stat-active-sub", active
+    ? [count.downloading && `下载 ${count.downloading}`, count.merging && `合成 ${count.merging}`,
+       count.queued && `排队 ${count.queued}`].filter(Boolean).join(" · ")
+    : "排队 / 下载 / 合成");
+  setText("stat-pending-sub", pending
+    ? [count.new && `未下载 ${count.new}`, count.paused && `暂停 ${count.paused}`,
+       count.failed && `失败 ${count.failed}`].filter(Boolean).join(" · ")
+    : "未下载 / 暂停 / 失败");
+}
+
 function renderAnchorFilter(anchors) {
   const sel = $("sel-anchor-filter");
   const cur = String(listFilter);
@@ -463,7 +569,7 @@ $("sel-anchor-filter").addEventListener("change", (e) => {
 });
 $("btn-sort").addEventListener("click", () => {
   listSort = listSort === "desc" ? "asc" : "desc";
-  $("btn-sort").textContent = `时间 ${listSort === "desc" ? "↓" : "↑"}`;
+  $("btn-sort").querySelector("span").textContent = `时间 ${listSort === "desc" ? "↓" : "↑"}`;
   refresh();
 });
 
@@ -480,5 +586,6 @@ if (window.pywebview) {
 } else {
   window.addEventListener("pywebviewready", init);
   setTimeout(() => { if (!window.pywebview) $("session-list").innerHTML =
-    `<div class="empty">等待应用后端就绪…（若长时间无响应请重启程序）</div>`; }, 3000);
+    `<div class="empty"><div class="empty-ico">${ico("clock")}</div>
+     <div>等待应用后端就绪…（若长时间无响应请重启程序）</div></div>`; }, 3000);
 }

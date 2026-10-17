@@ -321,7 +321,7 @@ class DownloadManager:
                           if k != job.live_key and r.get("file") == final_rel), None)
             if owner:
                 msg = (f"{final.name} 已被场次 {owner} 记录，疑似同日序号重排冲突，"
-                       "可开启「文件名附加主播名与开播时间」或删除冲突文件后重试")
+                       "可在设置中开启文件名附加主播名与开播时间，或删除冲突文件后重试")
                 self._settle(job, "failed", msg)
                 self.store.log(msg, "error")
                 return
