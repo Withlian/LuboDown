@@ -263,7 +263,10 @@ class DownloadManager:
             try:
                 self._download(job)
             except Exception as e:  # 兜底，保证队列线程不死
-                self._settle(job, "failed", str(e))
+                try:
+                    self._settle(job, "failed", str(e))
+                except Exception:   # 落库本身失败（如 sessions.json 被占用）也不能让异常逃出循环
+                    job.status, job.error = "failed", str(e)
                 self.store.log(f"下载异常终止：{e}", "error")
 
     # ------------- 下载主体 -------------
@@ -556,8 +559,11 @@ class DownloadManager:
                    "-allowed_extensions", "ALL", "-protocol_whitelist", "file",
                    "-i", list_file.name,
                    "-c", "copy", str(tmp_out.resolve())]
+            # pythonw 无控制台，不加 CREATE_NO_WINDOW 会给 ffmpeg 弹出黑窗口直到合成结束
             proc = subprocess.Popen(cmd, cwd=parts_dir, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE, text=True)
+                                    stderr=subprocess.PIPE, text=True,
+                                    encoding="utf-8", errors="replace",   # ffmpeg 输出 UTF-8，不能按系统 ANSI 编码解码
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
             stderr = ""
             deadline = time.monotonic() + 3600
             while True:

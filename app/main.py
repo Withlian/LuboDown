@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import pystray
@@ -22,7 +23,7 @@ from .api import Api
 from .bilibili import BiliClient
 from .downloader import DownloadManager
 from .scheduler import Scheduler
-from .store import Store
+from .store import LOG_FILE, Store
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _kernel32.CreateMutexW.restype = ctypes.c_void_p
@@ -56,22 +57,50 @@ def make_icon_image() -> Image.Image:
     return img
 
 
+def log_crash(where: str, exc: BaseException) -> None:
+    """未捕获异常写入 lubo.log：pythonw 下没有控制台，否则崩溃不留任何痕迹。"""
+    text = "".join(traceback.format_exception(exc))
+    try:
+        LOG_FILE.parent.mkdir(exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%m-%d %H:%M:%S')}] [error] {where}未捕获异常：\n{text}")
+    except OSError:
+        pass
+
+
+def _thread_excepthook(args) -> None:
+    if args.exc_type is SystemExit:
+        return
+    log_crash(f"线程 {args.thread.name if args.thread else '?'} ", args.exc_value)
+
+
 def build_app():
     store = Store()
     client = BiliClient(store)
     manager = DownloadManager(store, client)
     scheduler = Scheduler(store, client, manager)
     api = Api(store, client, manager, scheduler)
-    return store, api
+    return store, scheduler, api
 
 
 def run():
+    threading.excepthook = _thread_excepthook
+    try:
+        _run()
+    except Exception as e:
+        log_crash("主线程", e)
+        ctypes.windll.user32.MessageBoxW(
+            0, f"LuboDown 运行出错：{e}\n\n详细信息见 config/lubo.log", "LuboDown", 0x10)
+        raise
+
+
+def _run():
     if not acquire_single_instance():
         ctypes.windll.user32.MessageBoxW(
             0, "LuboDown 已经在运行（请查看系统托盘）。", "LuboDown", 0x40)
         return
 
-    store, api = build_app()
+    store, scheduler, api = build_app()
     store.log(f"LuboDown v{__version__} 启动")
 
     if getattr(sys, "frozen", False):

@@ -17,7 +17,11 @@ CONFIG_DIR = APP_DIR / "config"
 DEFAULT_DOWNLOAD_DIR = APP_DIR / "downloads"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 SESSIONS_FILE = CONFIG_DIR / "sessions.json"
+DELETED_FILE = CONFIG_DIR / "deleted.json"
 LOG_FILE = CONFIG_DIR / "lubo.log"
+
+# 用户删除的场次在此期限内不再被检查重新入库（B 站回放只保留约 14 天，留足余量）
+DELETED_KEEP_SEC = 30 * 86400
 
 DEFAULT_SETTINGS = {
     "sessdata": "",
@@ -57,6 +61,9 @@ class Store:
             self._save(SETTINGS_FILE, self.settings)
         self.sessions: dict[str, dict] = self._load(SESSIONS_FILE, {})
         self._normalize_session_files()
+        self.deleted: dict[str, int] = self._load(DELETED_FILE, {})   # live_key -> 删除时间戳
+        if self._prune_deleted():
+            self._save(DELETED_FILE, self.deleted)
         self._logs: list[dict] = []
 
     @staticmethod
@@ -118,7 +125,23 @@ class Store:
     def _save(file: Path, data) -> None:
         tmp = file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(file)
+        for i in range(3):   # 目标文件可能被杀毒/网盘同步短暂占用
+            try:
+                tmp.replace(file)
+                return
+            except PermissionError:
+                if i == 2:
+                    raise
+                time.sleep(0.3)
+
+    def _prune_deleted(self) -> bool:
+        """清掉过期的删除记录，返回是否有变化。"""
+        cutoff = time.time() - DELETED_KEEP_SEC
+        expired = [k for k, t in self.deleted.items()
+                   if not isinstance(t, (int, float)) or t < cutoff]
+        for k in expired:
+            del self.deleted[k]
+        return bool(expired)
 
     # ---------- settings ----------
     def save_settings(self, patch: dict) -> None:
@@ -151,6 +174,8 @@ class Store:
                     if key:
                         self.log(f"忽略异常 live_key 的场次：{key[:24]}")
                     continue
+                if key in self.deleted:   # 用户删过的场次不再重新入库（否则会被自动下载再下一遍）
+                    continue
                 if key not in self.sessions:
                     it.setdefault("status", "new")
                     self.sessions[key] = it
@@ -171,6 +196,9 @@ class Store:
         with self._lock:
             self.sessions.pop(live_key, None)
             self._save(SESSIONS_FILE, self.sessions)
+            self.deleted[live_key] = int(time.time())
+            self._prune_deleted()
+            self._save(DELETED_FILE, self.deleted)
 
     def all_sessions(self) -> list[dict]:
         with self._lock:
@@ -200,7 +228,7 @@ class Store:
         if sys.stdout is not None:  # pythonw 下无控制台，stdout 为 None
             try:
                 print(line, end="")
-            except OSError:
+            except (OSError, UnicodeEncodeError):  # pywebview 会把 None 的 stdout 换成系统 ANSI 编码的 devnull，非中文系统写中文会抛错
                 pass
 
     def recent_logs(self, n: int = 200) -> list[dict]:

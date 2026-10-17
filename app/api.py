@@ -165,7 +165,7 @@ class Api:
 
     def delete_session(self, live_key: str, delete_files: bool = False) -> dict:
         job = self._manager.job_view(live_key)
-        if job and job.status in ACTIVE_STATES:
+        if job and job["status"] in ACTIVE_STATES:   # job_view 返回的是 dict 视图
             return {"ok": False, "message": "请先暂停下载再删除"}
         rec = self._store.sessions.get(live_key)
         if delete_files and rec:
