@@ -92,7 +92,7 @@
 .hint { font-size: 13px; color: var(--fg-2); }
 
 /* ============ 表单 ============ */
-input[type=text], input[type=password], input[type=datetime-local], select {
+input[type=text], input[type=password], input[type=number], input[type=datetime-local], select {
   height: 40px; padding: 0 14px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px;
   color: var(--fg); font-size: 14px; outline: none;
@@ -104,6 +104,7 @@ input:hover, select:hover { border-color: color-mix(in srgb, var(--primary) 30%,
 input:focus, select:focus { background: var(--surface); border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
 .search input:focus { box-shadow: none; background: transparent; }
 input[type=datetime-local]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .6; }
+input.num { width: 96px; padding: 0 10px 0 14px; font-variant-numeric: tabular-nums; }
 select { appearance: none; -webkit-appearance: none; padding-right: 34px; cursor: pointer; }
 select option { background: var(--surface); color: var(--fg); }
 .select-wrap { position: relative; display: inline-flex; }

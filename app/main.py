@@ -19,7 +19,7 @@ import webview
 from PIL import Image, ImageDraw
 
 from . import __version__
-from .api import Api
+from .api import Api, clamp_setting
 from .bilibili import BiliClient
 from .downloader import DownloadManager
 from .scheduler import Scheduler
@@ -110,25 +110,31 @@ def _run():
         ui_base = Path(__file__).parent
 
     # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角见 WindowFrame
+    # 窗口大小固定（不能拖边缘或最大化），尺寸在设置中修改
     min_size = (980, 620)
     native_corners = WindowFrame.native_corners()
+    try:
+        width = clamp_setting("window_width", store.settings.get("window_width"))
+        height = clamp_setting("window_height", store.settings.get("window_height"))
+    except (TypeError, ValueError):
+        width, height = 1240, 820
     window = webview.create_window(
         f"LuboDown v{__version__} · B站直播回放下载",
         str(ui_base / "ui" / "index.html"),
         js_api=api,
-        width=1240, height=820,
-        min_size=min_size,
+        width=width, height=height,
+        min_size=min_size, resizable=False,
         frameless=True, easy_drag=False,
         # 原生圆角依赖 DWM 绘制窗口框架（即 shadow）；区域裁剪方式下 DWM 框架会把窗口画成方形，须关闭
         shadow=native_corners,
-        background_color="#0A0A0A" if WindowFrame.system_dark() else "#FAFAFB",
+        background_color="#17161A" if WindowFrame.system_dark() else "#FAFAFB",   # 与 tokens.css 的 --bg 一致
     )
 
     def hide_to_tray():
         window.hide()
         store.log("窗口已最小化到托盘，任务继续运行")
 
-    frame = WindowFrame(window, min_size, hide_to_tray)
+    frame = WindowFrame(window, min_size, hide_to_tray, resizable=False)
     api.attach(window, webview, frame)
     window.events.before_show += frame.attach
 

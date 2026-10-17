@@ -24,7 +24,17 @@
         "#sel-concurrency": ["change", (e) => save({ concurrency: Number(e.target.value) }, "并发数已保存")],
         "#sw-keep-parts": ["change", (e) => save({ keep_parts: e.target.checked }, e.target.checked ? "将保留分段文件" : "分段文件将在合成后清除")],
         "#sw-name-anchor": ["change", (e) => save({ name_with_anchor: e.target.checked }, e.target.checked ? "新下载的文件名将包含主播名与开播时间" : "文件名保持纯日期序号格式")],
+        "#sel-win-preset": ["change", (e) => {
+          if (e.target.value === "custom") { $("#in-win-w").focus(); return; }
+          [$("#in-win-w").value, $("#in-win-h").value] = e.target.value.split("x");
+        }],
+        "#in-win-w": ["input", () => this._syncPreset()],
+        "#in-win-h": ["input", () => this._syncPreset()],
+        "#btn-win-apply": ["click", (e) => this.applyWindowSize(e.currentTarget)],
       });
+      for (const id of ["#in-win-w", "#in-win-h"]) {
+        $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-win-apply").click(); });
+      }
       $("#anchor-chips").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-uid]");
         if (btn) this.removeAnchor(btn);
@@ -40,12 +50,15 @@
     render(state) {
       const s = state.settings || {};
       const sig = JSON.stringify([s.has_sessdata, s.has_bili_jct, s.anchors, s.download_dir,
-        s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor]);
+        s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor, s.window_width, s.window_height]);
       if (sig === this.sig) return;
       this.sig = sig;
       const setVal = (id, v) => { const el = $(id); if (document.activeElement !== el) el.value = v; };
       setVal("#in-download-dir", s.download_dir || "");
       setVal("#in-ffmpeg", s.ffmpeg_path || "");
+      setVal("#in-win-w", s.window_width || 1240);
+      setVal("#in-win-h", s.window_height || 820);
+      this._syncPreset();
       $("#sel-concurrency").value = String(s.concurrency || 6);
       $("#sw-keep-parts").checked = !!s.keep_parts;
       $("#sw-name-anchor").checked = !!s.name_with_anchor;
@@ -101,6 +114,28 @@
         await Motion.collapse(chip);
         this.toast("已移除", "ok");
         this.store.refresh();
+      }
+    }
+
+    /** 输入的宽高恰好是某个预设时选中它，否则显示"自定义" */
+    _syncPreset() {
+      const sel = $("#sel-win-preset");
+      const v = `${$("#in-win-w").value}x${$("#in-win-h").value}`;
+      sel.value = Array.from(sel.options).some((o) => o.value === v) ? v : "custom";
+    }
+
+    async applyWindowSize(btn) {
+      const w = parseInt($("#in-win-w").value, 10), h = parseInt($("#in-win-h").value, 10);
+      if (!(w >= 980 && w <= 3840 && h >= 620 && h <= 2160)) {
+        this.toast("宽度需在 980–3840、高度需在 620–2160 之间", "err");
+        return;
+      }
+      const r = await Motion.busy(btn, () => this.api.call("set_window_size", w, h));
+      if (r && r.ok) {
+        this.toast(r.fitted ? `受屏幕大小限制，窗口已设为 ${r.width} × ${r.height}` : `窗口大小已设为 ${r.width} × ${r.height}`, "ok");
+        this.store.refresh();
+      } else if (r) {
+        this.toast(r.message || "设置失败", "err");
       }
     }
 

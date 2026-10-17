@@ -12,7 +12,14 @@ from .store import ACTIVE_STATES
 SETTING_RANGES = {
     "check_interval_min": (5, 10_080),   # 定时检查间隔（分钟）
     "concurrency": (1, 16),              # 分段下载并发数
+    "window_width": (980, 3840),         # 窗口大小（逻辑像素），下限与 main.py 的 min_size 一致
+    "window_height": (620, 2160),
 }
+
+
+def clamp_setting(key: str, value) -> int:
+    lo, hi = SETTING_RANGES[key]
+    return min(hi, max(lo, int(value)))
 
 
 class Api:
@@ -66,10 +73,10 @@ class Api:
             v = (patch.get(key) or "").strip()
             if v:
                 clean[key] = v
-        for key, (lo, hi) in SETTING_RANGES.items():
+        for key in SETTING_RANGES:
             try:
                 if patch.get(key) is not None:
-                    clean[key] = min(hi, max(lo, int(patch[key])))
+                    clean[key] = clamp_setting(key, patch[key])
             except (TypeError, ValueError):
                 pass
         for key in ("auto_check", "auto_download", "keep_parts", "name_with_anchor"):
@@ -128,6 +135,16 @@ class Api:
 
     def window_resize(self, edge: str) -> None:
         self._frame.resize(str(edge))
+
+    def set_window_size(self, width: int, height: int) -> dict:
+        """设置中修改窗口大小：立即生效并保存，下次启动沿用。返回实际尺寸（受屏幕大小限制可能更小）。"""
+        try:
+            w, h = clamp_setting("window_width", width), clamp_setting("window_height", height)
+        except (TypeError, ValueError):
+            return {"ok": False, "message": "宽高必须是数字"}
+        self._store.save_settings({"window_width": w, "window_height": h})
+        aw, ah = self._frame.set_size(w, h)
+        return {"ok": True, "width": aw, "height": ah, "fitted": (aw, ah) != (w, h)}
 
     # ============ 主播 ============
     def add_anchor(self, uid: int) -> dict:

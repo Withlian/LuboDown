@@ -36,6 +36,8 @@ DEFAULT_SETTINGS = {
     "keep_parts": False,            # 合成后是否保留分段文件
     "name_with_anchor": False,      # 文件名附加主播名与开播时间
     "ffmpeg_path": "ffmpeg",        # ffmpeg 可执行文件
+    "window_width": 1240,           # 窗口大小（逻辑像素，固定不可拖动调整，在设置中修改）
+    "window_height": 820,
 }
 
 # 会话状态机: new -> queued -> downloading -> merging -> done / failed / paused

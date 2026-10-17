@@ -333,6 +333,30 @@
             <input type="text" id="in-ffmpeg" placeholder="ffmpeg" autocomplete="off">
           </label>
         </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-square"/></svg></span><h3>窗口</h3></div>
+          <p class="desc">窗口大小固定，不能拖动边缘调整。选择预设或输入宽高后点击<b>应用</b>，立即生效并在下次启动时沿用；超出屏幕时会自动缩小到屏幕内。</p>
+          <div class="row">
+            <span class="row-label fixed">预设</span>
+            <div class="select-wrap">
+              <select id="sel-win-preset">
+                <option value="1100x720">紧凑 1100 × 720</option>
+                <option value="1240x820">标准 1240 × 820</option>
+                <option value="1440x900">宽松 1440 × 900</option>
+                <option value="1600x1000">大屏 1600 × 1000</option>
+                <option value="custom">自定义</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <span class="row-label fixed">宽 × 高</span>
+            <input type="number" id="in-win-w" class="num" min="980" max="3840" step="10" autocomplete="off">
+            <span class="hint">×</span>
+            <input type="number" id="in-win-h" class="num" min="620" max="2160" step="10" autocomplete="off">
+            <button class="btn secondary" id="btn-win-apply">应用</button>
+          </div>
+        </div>
       </div>
     </section>
   </main>

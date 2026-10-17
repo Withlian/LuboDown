@@ -54,10 +54,11 @@ class WindowFrame:
     TRACK_HZ = 120
     RADIUS = 20          # 与 base.css 中 .shell 的圆角一致（逻辑像素）
 
-    def __init__(self, window, min_size: tuple[int, int], on_close):
+    def __init__(self, window, min_size: tuple[int, int], on_close, resizable: bool = True):
         self._window = window
         self._min_size = min_size
         self._on_close = on_close
+        self._resizable = resizable  # False：固定大小，不能拖边缘缩放或最大化，尺寸只经 set_size 修改
         self._hwnd = None
         self._maximized = False
         self._normal = None          # 最大化前的窗口矩形
@@ -91,17 +92,42 @@ class WindowFrame:
             # 关闭 DWM 非客户区绘制：开启时 DWM 按方形窗口矩形渲染，窗口区域只裁剪点击不裁剪画面
             self._dwm_set(DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED)
             self._window.events.resized += self._update_shape
+        self._fit_work_area()
         self._update_shape()
 
     def state(self) -> dict:
-        return {"maximized": self._maximized, "native_corners": self._native}
+        return {"maximized": self._maximized, "native_corners": self._native, "resizable": self._resizable}
+
+    def set_size(self, width: int, height: int) -> tuple[int, int]:
+        """按逻辑像素设置窗口大小并保持中心不动；超出屏幕工作区时缩到工作区内。返回实际逻辑尺寸。"""
+        if not self._hwnd or self._maximized:
+            return width, height
+        scale = self._scale()
+        l, t, r, b = self._rect()
+        wl, wt, wr, wb = self._work_area()
+        w = min(int(width * scale), wr - wl)
+        h = min(int(height * scale), wb - wt)
+        x = min(max(wl, (l + r - w) // 2), wr - w)
+        y = min(max(wt, (t + b - h) // 2), wb - h)
+        self._move_to(x, y, x + w, y + h)
+        self._update_shape()
+        return round(w / scale), round(h / scale)
+
+    def _fit_work_area(self) -> None:
+        """启动时窗口大于屏幕工作区（小屏或高缩放）则缩小并居中：固定大小的窗口用户无法自行拖小。"""
+        l, t, r, b = self._rect()
+        wl, wt, wr, wb = self._work_area()
+        w, h = min(r - l, wr - wl), min(b - t, wb - wt)
+        if (w, h) != (r - l, b - t):
+            x, y = wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2
+            self._move_to(x, y, x + w, y + h)
 
     # ============ 窗口按钮 ============
     def minimize(self) -> None:
         self._window.minimize()
 
     def toggle_maximize(self) -> dict:
-        if not self._hwnd:
+        if not self._hwnd or not self._resizable:
             return self.state()
         if self._maximized:
             self._maximized = False
@@ -127,7 +153,7 @@ class WindowFrame:
 
     def resize(self, edge: str) -> None:
         """按住边缘缩放；edge 为 n/s/e/w 及其组合（如 "se"）。"""
-        if self._hwnd and not self._maximized and self._button_down():
+        if self._hwnd and self._resizable and not self._maximized and self._button_down():
             self._track(edge)
 
     def _track(self, edge: str) -> None:

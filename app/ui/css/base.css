@@ -57,7 +57,8 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 .rz-ne, .rz-nw, .rz-se, .rz-sw { width: 18px; height: 18px; }   /* 圆角外侧被裁掉不可点，角手柄需更大 */
 .rz-nw { top: 0; left: 0; cursor: nwse-resize; } .rz-se { bottom: 0; right: 0; cursor: nwse-resize; }
 .rz-ne { top: 0; right: 0; cursor: nesw-resize; } .rz-sw { bottom: 0; left: 0; cursor: nesw-resize; }
-[data-window="max"] .rz { display: none; }
+/* 默认固定大小：后端声明可缩放后才显示缩放手柄与最大化按钮，避免启动时闪现 */
+[data-window="max"] .rz, :root:not([data-resizable="yes"]) .rz, :root:not([data-resizable="yes"]) #win-max { display: none; }
 
 /* ============ 侧边栏：浮动粉色图标栏，可展开显示文字 ============ */
 .sidebar {

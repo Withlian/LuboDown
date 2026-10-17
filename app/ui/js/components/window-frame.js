@@ -38,7 +38,7 @@
       if (!e.target.closest("[data-drag]") || e.target.closest(INTERACTIVE)) return;
       e.preventDefault();
       // 按住期间由后端跟随光标移动窗口，dblclick 不可靠，这里按两次按下的间隔自行判断双击
-      if (e.timeStamp - this.lastDown < DBL_CLICK_MS) {
+      if (e.timeStamp - this.lastDown < DBL_CLICK_MS && this.html.dataset.resizable === "yes") {
         this.lastDown = 0;
         this.toggleMaximize();
         return;
@@ -51,6 +51,7 @@
       if (!state) return;
       this.html.dataset.window = state.maximized ? "max" : "normal";
       this.html.dataset.corners = state.native_corners ? "native" : "region";
+      this.html.dataset.resizable = state.resizable ? "yes" : "no";
       this.maxBtn.title = state.maximized ? "还原" : "最大化";
     }
   }
