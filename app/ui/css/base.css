@@ -58,7 +58,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 .rz-ne { top: 0; right: 0; cursor: nesw-resize; } .rz-sw { bottom: 0; left: 0; cursor: nesw-resize; }
 [data-window="max"] .rz { display: none; }
 
-/* ============ 侧边栏：浮动紫色图标栏，可展开显示文字 ============ */
+/* ============ 侧边栏：浮动粉色图标栏，可展开显示文字 ============ */
 .sidebar {
   position: relative; z-index: 5; flex-shrink: 0;
   display: flex; flex-direction: column; gap: 18px;

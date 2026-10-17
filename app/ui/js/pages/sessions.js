@@ -1,11 +1,11 @@
-/* 回放列表页：主视觉卡（14 天曲线 + 统计）、快捷卡（检查 / 下载速度）、场次卡片网格（筛选、搜索、排序）。 */
+/* 回放列表页：主视觉卡（14 天曲线 + 统计）、快捷卡（检查 / 下载速度）、场次卡片网格（筛选、搜索、排序）。
+   这里负责发现场次与开始下载；下载过程在下载页管理，有任务的卡片跳转过去。 */
 (function (Lubo) {
   "use strict";
 
   const { $, $$, icon, fmtSpeed, fmtDayLabel, dayKey, fmtCountdown } = Lubo.util;
   const { Motion, SessionCard, StateStore, Sparkline, Tabs } = Lubo;
   const DAYS = 14;
-  const SPEED_SAMPLES = 30;
 
   class SessionsPage extends Lubo.Page {
     constructor(app, root) {
@@ -14,9 +14,8 @@
       this.statusTabs = new Tabs($("#status-tabs"));
       this.heroChart = new Sparkline($("#hero-chart"));
       this.speedChart = new Sparkline($("#speed-chart"), 4);
-      this.speeds = new Array(SPEED_SAMPLES).fill(0);
       this.filter = { status: "all", uid: null, text: "", desc: true };
-      this.cards = new Map();          // live_key -> { structure, status }
+      this.cards = new Map();          // live_key -> { html, status }
       this.gridSig = "";
       this.pendingRemove = null;
       this.chartSig = "";
@@ -27,7 +26,6 @@
         "#btn-check": ["click", (e) => this.checkNow(e.currentTarget)],
         "#btn-refresh": ["click", (e) => this.refreshList(e.currentTarget)],
         "#btn-sort": ["click", (e) => this._toggleSort(e.currentTarget)],
-        "#btn-open-dir": ["click", () => this.api.call("open_path", "", false)],
       });
       this.grid.addEventListener("click", (e) => this._onCardAction(e));
     }
@@ -40,8 +38,7 @@
     render(state) {
       const sessions = state.sessions || [];
       this._renderHero(sessions);
-      if (state !== this.lastState) this._renderQuick(sessions);   // 速度曲线只在新一轮轮询时采样，筛选/搜索不推进
-      this.lastState = state;
+      this._renderQuick(sessions);
       this._renderGrid(this._view(sessions));
     }
 
@@ -86,11 +83,9 @@
     }
 
     _renderQuick(sessions) {
-      const running = sessions.filter((s) => s.status === "downloading" || s.status === "merging");
-      const speed = running.reduce((sum, s) => sum + (s.speed_bps || 0), 0);
-      this.speeds.push(speed);
-      this.speeds.shift();
-      this.speedChart.draw(this.speeds);
+      const running = sessions.filter((s) => StateStore.RUNNING.has(s.status));
+      const speed = this.store.speed;
+      this.speedChart.draw(this.store.speeds);
       const cur = running[0];
       $("#dl-speed").textContent = speed ? fmtSpeed(speed) : running.length ? "合成中" : "空闲";
       $("#dl-title").textContent = cur ? `${cur.title || "未命名直播"} · ${+(cur.percent || 0).toFixed(1)}%` : "暂无进行中的任务";
@@ -112,9 +107,8 @@
       const { status, uid, text, desc } = this.filter;
       const match = {
         all: () => true,
-        active: (s) => StateStore.ACTIVE.has(s.status),
+        pending: (s) => StateStore.PENDING.has(s.status),   // 未下载：含暂停与失败
         done: (s) => s.status === "done",
-        pending: (s) => StateStore.PENDING.has(s.status),
       }[status];
       return sessions
         .filter((s) => match(s)
@@ -147,7 +141,7 @@
           return `<div class="slot" data-key="${Lubo.util.esc(s.live_key)}"${enter}></div>`;
         }).join("");
         this.gridSig = sig;
-        for (const entry of this.cards.values()) entry.structure = null;
+        for (const entry of this.cards.values()) entry.html = null;
       }
       for (const s of list) this._renderCard(s);
       if (rects) Motion.play($$(".slot", this.grid), (el) => el.dataset.key, rects);
@@ -156,18 +150,12 @@
     _renderCard(s) {
       const slot = this.grid.querySelector(`.slot[data-key="${CSS.escape(s.live_key)}"]`);
       if (!slot) return;
-      const confirming = this.pendingRemove === s.live_key;
-      const structure = SessionCard.structure(s, confirming);
+      const html = SessionCard.html(s, this.pendingRemove === s.live_key);
       const prev = this.cards.get(s.live_key);
-      if (!prev || prev.structure !== structure) {
-        slot.innerHTML = SessionCard.html(s, confirming);
-        if (prev && prev.status && prev.status !== s.status) Motion.fadeIn(slot.firstElementChild);
-        this.cards.set(s.live_key, { structure, status: s.status });
-        // 进度条从 0 起步，下一帧设为实际值，借过渡平滑推进
-        requestAnimationFrame(() => requestAnimationFrame(() => slot.firstElementChild && SessionCard.patch(slot.firstElementChild, s)));
-      } else {
-        SessionCard.patch(slot.firstElementChild, s);
-      }
+      if (prev && prev.html === html) return;
+      slot.innerHTML = html;
+      if (prev && prev.status && prev.status !== s.status) Motion.fadeIn(slot.firstElementChild);
+      this.cards.set(s.live_key, { html, status: s.status });
     }
 
     async _onCardAction(e) {
@@ -179,12 +167,9 @@
       if (act === "start") {
         const r = await Motion.busy(btn, () => this.api.call("start_download", key));
         if (r && r.ok) { this.toast("已加入下载队列", "ok"); this.store.refresh(); }
-      } else if (act === "pause") {
-        await Motion.busy(btn, () => this.api.call("pause_download", key));
-        this.toast("暂停请求已发送");
-        this.store.refresh();
-      } else if (act === "open") {
-        if (session && session.file) this.api.call("open_path", session.file, true);
+        else if (r) { this.toast("该场次已不存在，列表即将刷新", "err"); this.store.refresh(); }
+      } else if (act === "goto") {
+        this.app.showDownloads(session ? SessionCard.downloadsTab(session) : null);
       } else if (act === "remove") {
         this._remove(btn, key, session);
       }

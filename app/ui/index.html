@@ -64,7 +64,7 @@
 </svg>
 
 <div class="shell" id="shell" data-page="sessions">
-  <!-- ============ 侧边栏（浮动紫色图标栏，可展开） ============ -->
+  <!-- ============ 侧边栏（浮动粉色图标栏，可展开） ============ -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-logo" data-drag>
       <span class="sb-mark"><svg class="ico"><use href="#i-arrow-down"/></svg></span>
@@ -74,6 +74,9 @@
       <span class="sb-pill" id="sb-pill"></span>
       <button class="sb-item active" data-page="sessions" data-tip="回放列表">
         <svg class="ico"><use href="#i-list"/></svg><span class="sb-label">回放列表</span>
+      </button>
+      <button class="sb-item" data-page="downloads" data-tip="下载">
+        <svg class="ico"><use href="#i-download"/></svg><span class="sb-label">下载</span>
       </button>
       <button class="sb-item" data-page="schedule" data-tip="定时任务">
         <svg class="ico"><use href="#i-clock"/></svg><span class="sb-label">定时任务</span>
@@ -125,9 +128,9 @@
           <div class="spark-axis" id="hero-axis"></div>
           <div class="hero-stats">
             <div class="hero-stat"><span>全部场次</span><b id="stat-total">0</b></div>
-            <div class="hero-stat hl"><span>进行中</span><b id="stat-active">0</b></div>
-            <div class="hero-stat"><span>已完成</span><b id="stat-done">0</b></div>
-            <div class="hero-stat"><span>待处理</span><b id="stat-pending">0</b></div>
+            <div class="hero-stat"><span>未下载</span><b id="stat-pending">0</b></div>
+            <div class="hero-stat"><span>下载中</span><b id="stat-active">0</b></div>
+            <div class="hero-stat"><span>已下载</span><b id="stat-done">0</b></div>
           </div>
         </div>
         <div class="quick-col">
@@ -148,7 +151,7 @@
                 <strong id="dl-speed">空闲</strong>
                 <small class="quick-sub" id="dl-title">暂无进行中的任务</small>
               </div>
-              <button class="round-btn" id="btn-open-dir" title="打开下载目录"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
+              <button class="round-btn" data-goto="downloads" title="查看下载"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
             </div>
           </div>
         </div>
@@ -160,15 +163,44 @@
           <div class="tabs" id="status-tabs">
             <span class="tabs-pill"></span>
             <button class="tab active" data-value="all">全部</button>
-            <button class="tab" data-value="active">进行中</button>
-            <button class="tab" data-value="done">已完成</button>
-            <button class="tab" data-value="pending">待处理</button>
+            <button class="tab" data-value="pending">未下载</button>
+            <button class="tab" data-value="done">已下载</button>
           </div>
           <button class="btn ghost small" id="btn-sort" title="切换排序"><svg class="ico"><use href="#i-sort"/></svg><span>最新在前</span></button>
           <button class="btn secondary small" id="btn-refresh"><svg class="ico"><use href="#i-refresh"/></svg><span>刷新列表</span></button>
         </div>
       </div>
       <div class="grid" id="session-grid"><div class="empty">加载中…</div></div>
+    </section>
+
+    <!-- 下载页 -->
+    <section id="page-downloads" class="page">
+      <div class="hero dl-hero">
+        <div class="hero-head"><span>下载速度</span><span class="hero-range">实时</span></div>
+        <div class="dl-speed"><strong id="dlp-speed">空闲</strong><small id="dlp-sub">暂无进行中的任务</small></div>
+        <svg class="spark" id="dlp-chart" viewBox="0 0 600 120" preserveAspectRatio="none">
+          <path class="spark-area"/><path class="spark-line"/>
+        </svg>
+        <div class="hero-stats cols-3">
+          <div class="hero-stat"><span>下载中</span><b id="dlp-running">0</b></div>
+          <div class="hero-stat"><span>排队中</span><b id="dlp-queued">0</b></div>
+          <div class="hero-stat"><span>已完成</span><b id="dlp-done">0</b></div>
+        </div>
+      </div>
+
+      <div class="list-head">
+        <h2>下载任务 <span class="count" id="dlp-count">0</span></h2>
+        <div class="list-tools">
+          <div class="tabs" id="dlp-tabs">
+            <span class="tabs-pill"></span>
+            <button class="tab active" data-value="active">进行中</button>
+            <button class="tab" data-value="stopped">已暂停 / 失败</button>
+            <button class="tab" data-value="done">已完成</button>
+          </div>
+          <button class="btn secondary small" id="btn-open-dir"><svg class="ico"><use href="#i-folder-open"/></svg><span>打开下载目录</span></button>
+        </div>
+      </div>
+      <div class="dl-list" id="dlp-list"></div>
     </section>
 
     <!-- 定时任务页 -->
@@ -319,7 +351,7 @@
     <ul class="anchor-list" id="panel-anchors"></ul>
     <div class="panel-card">
       <div class="panel-card-head">
-        <span><svg class="ico"><use href="#i-terminal"/></svg>最近动态</span>
+        <span><svg class="ico"><use href="#i-terminal"/></svg>日志</span>
         <button class="link" data-goto="schedule">查看</button>
       </div>
       <ul class="mini-log" id="panel-logs"></ul>
@@ -353,6 +385,7 @@
 <script src="js/components/session-card.js"></script>
 <script src="js/pages/page.js"></script>
 <script src="js/pages/sessions.js"></script>
+<script src="js/pages/downloads.js"></script>
 <script src="js/pages/side-panel.js"></script>
 <script src="js/pages/schedule.js"></script>
 <script src="js/pages/settings.js"></script>

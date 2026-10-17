@@ -40,6 +40,12 @@ class Api:
                     "status", "error", "total_segs", "done_segs", "done_bytes",
                     "total_bytes", "speed_bps", "percent")})
                 view["file"] = jv["file"]
+            view["file_size"] = 0        # 下载页展示成品大小；文件被移走则为 0
+            if view["status"] == "done" and view["file"]:
+                try:
+                    view["file_size"] = os.path.getsize(view["file"])
+                except OSError:
+                    pass
             sessions.append(view)
         return {
             "settings": self._store.masked_settings(),

@@ -130,7 +130,11 @@ def _run():
     api.attach(window, webview, frame)
     window.events.before_show += frame.attach
 
+    exiting = threading.Event()
+
     def on_closing(window):  # 参数名必须是 window，pywebview 才会注入窗口对象
+        if exiting.is_set():   # 托盘退出时 destroy 同样触发本事件，放行且不记"最小化到托盘"
+            return True
         hide_to_tray()
         return False  # 阻止真正关闭
 
@@ -144,6 +148,7 @@ def _run():
             pass
 
     def on_exit():
+        exiting.set()
         store.log("退出 LuboDown")
         try:
             icon.stop()

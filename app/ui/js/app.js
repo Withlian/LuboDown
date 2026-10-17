@@ -17,6 +17,7 @@
 
       this.pages = {
         sessions: new Lubo.SessionsPage(this, $("#page-sessions")),
+        downloads: new Lubo.DownloadsPage(this, $("#page-downloads")),
         schedule: new Lubo.SchedulePage(this, $("#page-schedule")),
         settings: new Lubo.SettingsPage(this, $("#page-settings")),
       };
@@ -41,6 +42,12 @@
       clearTimeout(waiting);
       this.frame.sync();
       this.store.start();
+    }
+
+    /** 跳到下载页并切到指定标签（active / stopped / done，空则保持当前标签） */
+    showDownloads(tab) {
+      if (tab) this.pages.downloads.showTab(tab);
+      this.sidebar.select("downloads");
     }
 
     /** 旧页淡出后切入新页；连续快速点击以最后一次为准 */

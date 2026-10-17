@@ -1,4 +1,4 @@
-/* 右侧面板：主播列表（点击筛选回放、可只看有任务的主播）与最近动态。 */
+/* 右侧面板：主播列表（点击筛选回放、可只看有任务的主播）与最近日志。 */
 (function (Lubo) {
   "use strict";
 
@@ -39,6 +39,11 @@
         if (Lubo.StateStore.ACTIVE.has(s.status)) st.busy++;
         stats.set(String(s.uid), st);
       }
+      // 正在筛选的主播被移除后取消筛选，否则列表会一直停在已不存在的主播上
+      if (this.selected !== null && !anchors.some((a) => String(a.uid) === this.selected)) {
+        this.selected = null;
+        this.onSelect(null);
+      }
       const onlyBusy = this.tabs.value === "busy";
       const rows = anchors
         .map((a) => ({ uid: String(a.uid), name: a.name || String(a.uid), ...(stats.get(String(a.uid)) || { total: 0, busy: 0 }) }))
@@ -73,7 +78,7 @@
       this.logSig = sig;
       $("#panel-logs", this.root).innerHTML = recent.map((l) =>
         `<li class="${esc(l.level)}"><span class="t">${esc(l.t.slice(-8, -3))}</span><span class="msg" title="${esc(l.msg)}">${esc(l.msg)}</span></li>`,
-      ).join("") || `<li class="panel-empty">暂无动态</li>`;
+      ).join("") || `<li class="panel-empty">暂无日志</li>`;
     }
   }
 

@@ -37,7 +37,7 @@
       }
       if (!e.target.closest("[data-drag]") || e.target.closest(INTERACTIVE)) return;
       e.preventDefault();
-      // 系统移动循环会吞掉 dblclick，这里按两次按下的间隔自行判断双击
+      // 按住期间由后端跟随光标移动窗口，dblclick 不可靠，这里按两次按下的间隔自行判断双击
       if (e.timeStamp - this.lastDown < DBL_CLICK_MS) {
         this.lastDown = 0;
         this.toggleMaximize();

@@ -37,7 +37,7 @@ _gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
 
 SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
 MONITOR_DEFAULTTONEAREST = 2
-SM_SWAPBUTTON = 23
+SM_SWAPBUTTON, SM_CXDRAG, SM_CYDRAG = 23, 68, 69
 DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED = 2, 1
 
 
@@ -110,19 +110,9 @@ class WindowFrame:
     # 按住鼠标期间轮询光标并 SetWindowPos 跟随：不依赖系统移动循环，
     # 由前端 mousedown 经 JS API（后台线程）触发也能稳定工作。
     def drag(self) -> dict:
-        """按住标题区拖动；最大化时先按光标所在比例还原再跟随。"""
-        if not self._hwnd or not self._button_down():
-            return self.state()
-        if self._maximized:
-            x, _ = self._cursor()
-            l, t, r, _ = self._rect()
-            nl, nt, nr, nb = self._normal
-            w, h = nr - nl, nb - nt
-            left = int(x - w * (x - l) / max(1, r - l))
-            self._maximized = False
-            self._move_to(left, t, left + w, t + h)
-            self._update_region()
-        self._track("")
+        """按住标题区拖动；最大化时移动超过系统拖动阈值才还原（单击、双击不还原）。"""
+        if self._hwnd and self._button_down():
+            self._track("")
         return self.state()
 
     def resize(self, edge: str) -> None:
@@ -135,6 +125,10 @@ class WindowFrame:
         if not self._tracking.acquire(blocking=False):
             return
         try:
+            if not edge and self._maximized:
+                if not self._wait_drag_threshold():
+                    return
+                self._restore_under_cursor()
             l, t, r, b = self._rect()
             sx, sy = self._cursor()
             scale = self._scale()
@@ -160,6 +154,28 @@ class WindowFrame:
                 time.sleep(1 / self.TRACK_HZ)
         finally:
             self._tracking.release()
+
+    def _wait_drag_threshold(self) -> bool:
+        """按住期间光标移出系统拖动阈值返回 True；未移动就松开返回 False。"""
+        sx, sy = self._cursor()
+        tx, ty = _user32.GetSystemMetrics(SM_CXDRAG), _user32.GetSystemMetrics(SM_CYDRAG)
+        while self._button_down():
+            x, y = self._cursor()
+            if abs(x - sx) >= tx or abs(y - sy) >= ty:
+                return True
+            time.sleep(1 / self.TRACK_HZ)
+        return False
+
+    def _restore_under_cursor(self) -> None:
+        """从最大化还原到原尺寸，并保持光标在标题区的相对横向位置。"""
+        x, _ = self._cursor()
+        l, t, r, _ = self._rect()
+        nl, nt, nr, nb = self._normal
+        w, h = nr - nl, nb - nt
+        left = int(x - w * (x - l) / max(1, r - l))
+        self._maximized = False
+        self._move_to(left, t, left + w, t + h)
+        self._update_region()
 
     # ============ Win32 辅助 ============
     def _update_region(self) -> None:
