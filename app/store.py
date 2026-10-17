@@ -177,6 +177,11 @@ class Store:
             return sorted(self.sessions.values(),
                           key=lambda s: -int(s.get("start_time") or 0))
 
+    def snapshot_sessions(self) -> dict[str, dict]:
+        """锁内浅拷贝：后台线程遍历返回值，不会被 upsert 的并发增删打断迭代。"""
+        with self._lock:
+            return dict(self.sessions)
+
     # ---------- logs ----------
     def log(self, msg: str, level: str = "info") -> None:
         entry = {"t": time.strftime("%m-%d %H:%M:%S"), "level": level, "msg": msg}

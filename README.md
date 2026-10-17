@@ -9,7 +9,8 @@
 双击 启动LuboDown.bat
 ```
 
-依赖：Python 3.10+，`pip install -r requirements.txt`，系统需有 ffmpeg（在 PATH 中，或在设置里指定路径）。
+依赖：Python 3.10+，`pip install -r requirements.txt`（首次运行启动脚本会自动安装）。
+Release 包已内置 ffmpeg；从源码运行时 `bin/ffmpeg.exe` 不入库，需自行放入该位置、装进 PATH 或在设置里指定路径。
 
 ## 使用
 

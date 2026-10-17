@@ -11,7 +11,6 @@ const STATUS_TEXT = {
 };
 const ACTIVE_STATES = new Set(["queued", "downloading", "merging"]);
 
-let settingsLoaded = false;
 let pendingRemove = null;   // 两段式删除确认
 let countdownBase = null;
 let listFilter = "all";     // "all" 或主播 uid
@@ -94,7 +93,10 @@ function sessActions(s) {
   } else {
     html += `<button class="btn small primary" data-act="start" data-key="${key}">下载</button>`;
   }
-  const label = pendingRemove === s.live_key ? "确认删除?" : "删除";
+  // 已完成的会话确认后会连视频文件一起删，文案必须点明
+  const label = pendingRemove === s.live_key
+    ? (st === "done" ? "确认删除文件?" : "确认删除?")
+    : "删除";
   html += `<button class="btn small danger" data-act="remove" data-key="${key}">${label}</button>`;
   return html;
 }
@@ -441,7 +443,7 @@ async function refresh() {
     syncScheduleControls(s);
     renderFoot(s);
     renderAnchorFilter(st.anchors || []);
-    if (settingsLoaded) loadSettingsPage();
+    loadSettingsPage();
   }
   renderLogs(s.logs || []);
 }
@@ -470,9 +472,7 @@ function pollLoop() {
 }
 
 function init() {
-  settingsLoaded = true;
-  refresh();
-  pollLoop();
+  pollLoop();   // pollLoop 首轮即 refresh，不再额外多拉一次
 }
 
 if (window.pywebview) {

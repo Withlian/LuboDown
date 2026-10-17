@@ -1,7 +1,6 @@
 """LuboDown —— pywebview JS API 桥接层。前端通过 window.pywebview.api.* 调用。"""
 from __future__ import annotations
 
-import datetime as dt
 import os
 import subprocess
 from pathlib import Path
@@ -35,7 +34,7 @@ class Api:
             fp = self._store.resolve_session_file(rec)
             view["file"] = str(fp) if fp else ""
             jv = jobs.get(rec["live_key"])
-            if jv:                       # 下载中的任务用实时进度覆盖
+            if jv:                       # 有任务记录则以内存实时视图覆盖（终态两处一致）
                 view.update({k: jv[k] for k in (
                     "status", "error", "total_segs", "done_segs", "done_bytes",
                     "total_bytes", "speed_bps", "percent")})
@@ -46,7 +45,6 @@ class Api:
             "sessions": sessions,
             "scheduler": {
                 "checking": self._scheduler.checking,
-                "next_run_text": self._scheduler.next_run_text(),
                 "next_run_ts": int(self._scheduler.next_run),
             },
             "ffmpeg_ok": resolve_ffmpeg(self._store.settings) is not None,
@@ -72,23 +70,10 @@ class Api:
                 clean[key] = bool(patch[key])
         v = patch.get("auto_download_since")
         if v is not None:
-            if isinstance(v, str):
-                v = v.strip()
-                if not v:
-                    clean["auto_download_since"] = 0
-                else:
-                    try:
-                        t = dt.datetime.fromisoformat(v)
-                        if t.tzinfo is None:  # 前端 datetime-local 视为北京时间
-                            t = t.replace(tzinfo=dt.timezone(dt.timedelta(hours=8)))
-                        clean["auto_download_since"] = int(t.timestamp())
-                    except ValueError:
-                        return {"ok": False, "message": "起始时间格式不正确"}
-            else:
-                try:
-                    clean["auto_download_since"] = max(0, int(v))
-                except (TypeError, ValueError):
-                    pass
+            try:
+                clean["auto_download_since"] = max(0, int(v))
+            except (TypeError, ValueError):
+                pass
         if patch.get("download_dir") is not None:
             clean["download_dir"] = str(patch["download_dir"])   # 空串=恢复默认，save_settings 内部规范化
         if patch.get("ffmpeg_path"):
@@ -139,8 +124,14 @@ class Api:
         return {"ok": True, "name": info.get("name")}
 
     def remove_anchor(self, uid: int) -> dict:
-        anchors = [a for a in self._store.settings.get("anchors", [])
-                   if int(a["uid"]) != int(uid)]
+        anchors = []
+        for a in self._store.settings.get("anchors", []):
+            try:
+                if int(a["uid"]) == int(uid):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                pass    # 异常条目与 add_anchor 一致：跳过匹配、原样保留
+            anchors.append(a)
         self._store.save_settings({"anchors": anchors})
         return {"ok": True}
 
@@ -154,10 +145,13 @@ class Api:
         if not self._store.settings.get("sessdata"):
             return {"ok": False, "message": "请先在设置中填写 SESSDATA"}
         try:
-            total, added = self._scheduler.run_check()
+            result = self._scheduler.run_check()
         except Exception as e:
             self._store.log(f"刷新失败：{e}", "error")
             return {"ok": False, "message": str(e)}
+        if result is None:    # 与定时检查互斥，一轮结束后再试
+            return {"ok": False, "message": "已有检查在进行中"}
+        total, added = result
         self._store.log(f"手动刷新完成：{total} 场，新增 {added} 场")
         return {"ok": True, "total": total, "added": added}
 
@@ -186,8 +180,7 @@ class Api:
         # 同步移除任务记录并清理分段目录：任务残留会把之后重建的同名会话
         # 覆盖成旧状态，分段残留会让重建后的下载"未下先续"
         self._manager.discard(live_key)
-        if rec:
-            self._manager.purge_parts(live_key, rec.get("name"), rec.get("uid"))
+        self._manager.purge_parts(live_key)
         return {"ok": True}
 
     # ============ 文件 ============

@@ -2,7 +2,8 @@
 
 流程：GetUserSliceStream 拿 m3u8 -> 并发下载分段（可断点续传、
 签名过期自动刷新播放列表）-> ffmpeg 经本地 HLS 播放列表复封装为单个 MP4。
-所有网络访问都经过 bilibili 的 URL 安全校验（https/域名白名单/公网 IP 固定）。
+所有 B 站请求都经过 URL 安全校验（https/域名白名单/公网 IP 固定；
+DoH 解析的已知例外见 docs/replay-api-notes.md）。
 """
 from __future__ import annotations
 
@@ -145,7 +146,6 @@ class _KeepAlive:
                 self._conn = None
                 if attempt == 2:
                     raise
-        raise OSError("unreachable")
 
     def close(self):
         if self._conn is not None:
@@ -209,8 +209,7 @@ class DownloadManager:
         if job and job.status in ACTIVE_STATES:
             job.stop_event.set()
             # 立即反映到界面与数据库，不等工作线程响应
-            job.status, job.error = "paused", "已暂停（可继续）"
-            self.store.update_session(live_key, status="paused")
+            self._mark_paused(job)
             self.store.log("收到暂停请求，正在停止…")
 
     def job_view(self, live_key: str) -> dict | None:
@@ -228,15 +227,29 @@ class DownloadManager:
             if job and job.status not in ACTIVE_STATES:
                 del self.jobs[live_key]
 
-    def purge_parts(self, live_key: str, name, uid) -> None:
-        """删除会话后清理其分段目录（带重试，失败记录日志）。"""
-        anchor_dir = self.store.download_root() / safe_name(name or str(uid or ""))
-        self._cleanup_parts(anchor_dir / f".parts_{live_key}")
+    def purge_parts(self, live_key: str) -> None:
+        """删除会话后清理其分段目录（带重试，失败记录日志）。
+        按目录名在下载根目录下定位，主播改名后依然找得到。"""
+        for d in self.store.download_root().glob(f"*/.parts_{live_key}"):
+            self._cleanup_parts(d)
 
     # ------------- 队列线程 -------------
+    def _settle(self, job: Job, status: str, error: str = "",
+                file: Path | None = None) -> None:
+        """任务状态统一收口：内存 Job 与会话库同步更新，避免双写漂移。
+        file 传成品绝对路径；库中存相对下载根目录的便携形式。"""
+        job.status, job.error = status, error
+        fields = {"status": status, "error": error}
+        if file is not None:
+            job.file = str(file)
+            try:
+                fields["file"] = str(file.relative_to(self.store.download_root()))
+            except ValueError:   # 根目录被中途改走：存绝对路径，store 对外部路径原样保留
+                fields["file"] = str(file)
+        self.store.update_session(job.live_key, **fields)
+
     def _mark_paused(self, job: Job) -> None:
-        job.status, job.error = "paused", "已暂停（可继续）"
-        self.store.update_session(job.live_key, status="paused")
+        self._settle(job, "paused", "已暂停（可继续）")
 
     def _run_loop(self):
         while True:
@@ -250,8 +263,7 @@ class DownloadManager:
             try:
                 self._download(job)
             except Exception as e:  # 兜底，保证队列线程不死
-                job.status, job.error = "failed", str(e)
-                self.store.update_session(live_key, status="failed", error=str(e))
+                self._settle(job, "failed", str(e))
                 self.store.log(f"下载异常终止：{e}", "error")
 
     # ------------- 下载主体 -------------
@@ -261,7 +273,7 @@ class DownloadManager:
         d = datetime.fromtimestamp(job.start_time, TZ8).date()
         prefix = f"{d.year}.{d.month}.{d.day}"
         same_day = sorted(
-            (s for s in self.store.sessions.values()
+            (s for s in self.store.snapshot_sessions().values()
              if s.get("uid") == job.uid and s.get("start_time")
              and datetime.fromtimestamp(int(s["start_time"]), TZ8).date() == d),
             key=lambda s: int(s["start_time"]))
@@ -283,12 +295,12 @@ class DownloadManager:
         s = self.store.settings
         # —— 前置检查 ——
         if not s.get("sessdata"):
-            job.status, job.error = "failed", "未配置 SESSDATA，请先在设置中填写"
+            self._settle(job, "failed", "未配置 SESSDATA，请先在设置中填写")
             self.store.log(job.error, "error")
             return
         ffmpeg = resolve_ffmpeg(s)
         if ffmpeg is None:
-            job.status, job.error = "failed", "找不到 ffmpeg（已内置于项目 bin/ffmpeg.exe，或请在设置中指定路径）"
+            self._settle(job, "failed", "找不到 ffmpeg（已内置于项目 bin/ffmpeg.exe，或请在设置中指定路径）")
             self.store.log(job.error, "error")
             return
         anchor_dir, final, parts_dir = self._session_dir(job)
@@ -302,37 +314,37 @@ class DownloadManager:
             # 正常情况是断点/重复下载的跳过；但同日更早的场次可能晚于本场入库、
             # 令序号重排：若该路径记录在另一会话名下，属于编号冲突，
             # 拒绝把别人的成品误标为本场完成
-            owner = next((k for k, r in self.store.sessions.items()
+            owner = next((k for k, r in self.store.snapshot_sessions().items()
                           if k != job.live_key and r.get("file") == final_rel), None)
             if owner:
                 msg = (f"{final.name} 已被场次 {owner} 记录，疑似同日序号重排冲突，"
                        "可开启「文件名附加主播名与开播时间」或删除冲突文件后重试")
-                job.status, job.error = "failed", msg
-                self.store.update_session(job.live_key, status="failed", error=msg)
+                self._settle(job, "failed", msg)
                 self.store.log(msg, "error")
                 return
             if not s.get("keep_parts"):
                 self._cleanup_parts(parts_dir)   # 之前中断留下的分段一并清掉
-            job.status, job.file = "done", str(final)
-            self.store.update_session(job.live_key, status="done", file=final_rel)
+            self._settle(job, "done", file=final)
             self.store.log(f"文件已存在，跳过下载：{final}")
             return
-        free = shutil.disk_usage(root if root.exists() else Path.home()).free
-        if free < 3 * 1024**3:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            free = shutil.disk_usage(root).free
+        except OSError:
+            free = None   # 空间检查是尽力而为的提示，失败不阻断下载
+        if free is not None and free < 3 * 1024**3:
             self.store.log(f"警告：磁盘剩余空间仅 {free/1024**3:.1f}GB", "error")
 
         if job.stop_event.is_set():   # 拿到播放列表前就被暂停
             self._mark_paused(job)
             return
 
-        job.status = "downloading"
-        self.store.update_session(job.live_key, status="downloading")
+        self._settle(job, "downloading")
 
         try:
             pairs = self._fetch_playlist(job)
         except ApiError as e:
-            job.status, job.error = "failed", f"获取播放列表失败：{e.message}"
-            self.store.update_session(job.live_key, status="failed", error=job.error)
+            self._settle(job, "failed", f"获取播放列表失败：{e.message}")
             self.store.log(job.error, "error")
             return
 
@@ -363,27 +375,26 @@ class DownloadManager:
 
         remaining = self._missing_segments(pairs, parts_dir)
         if remaining:
-            job.status, job.error = "failed", f"{len(remaining)} 个分段多次重试后仍失败"
-            self.store.update_session(job.live_key, status="failed", error=job.error)
+            self._settle(job, "failed", f"{len(remaining)} 个分段多次重试后仍失败")
             self.store.log(job.error, "error")
             return
 
         # —— 合成 ——
-        job.status = "merging"
+        self._settle(job, "merging")
         job.speed_bps = 0
         self.store.log(f"分段全部完成（{job.done_bytes/1024**3:.2f}GB），开始 ffmpeg 合成…")
         durs = [d for _, d in pairs]
-        ok, msg = self._merge(parts_dir, final, ffmpeg, durs)
+        ok, msg = self._merge(parts_dir, final, ffmpeg, durs, job.stop_event)
         if not ok:
-            job.status, job.error = "failed", f"合成失败：{msg}"
-            self.store.update_session(job.live_key, status="failed", error=job.error)
+            if job.stop_event.is_set():   # 合成阶段被暂停：分段保留，续跑时重新合成
+                self._mark_paused(job)
+                return
+            self._settle(job, "failed", f"合成失败：{msg}")
             self.store.log(job.error, "error")
             return
         if not s.get("keep_parts"):
             self._cleanup_parts(parts_dir)
-        job.status, job.file, job.error = "done", str(final), ""
-        self.store.update_session(job.live_key, status="done",
-                                  file=str(final.relative_to(root)), error="")
+        self._settle(job, "done", file=final)
         self.store.log(f"完成：{final}")
 
     def _cleanup_parts(self, parts_dir: Path, tries: int = 3) -> None:
@@ -525,20 +536,19 @@ class DownloadManager:
 
     # ------------- 合成 -------------
     def _merge(self, parts_dir: Path, final: Path, ffmpeg: str,
-               durs: list[float]) -> tuple[bool, str]:
-        """用本地 HLS 播放列表交给 ffmpeg HLS demuxer 合成，
-        时间戳/时长与远端 m3u8 直接读取时一致（concat demuxer 会导致时间戳错乱）。
-        先写临时文件、成功后转正，避免失败留下被误判为已完成的半截成品。"""
+               durs: list[float], stop_event: threading.Event) -> tuple[bool, str]:
+        """用本地 HLS 播放列表交给 ffmpeg HLS demuxer 合成（按 durs 顺序逐段列出、
+        不扫描目录，杂散/多余分段不会混入），时间戳/时长与远端 m3u8 直接读取时一致
+        （concat demuxer 会导致时间戳错乱）。
+        先写临时文件、成功后转正，避免失败留下被误判为已完成的半截成品；
+        暂停时终止 ffmpeg 并删除半成品，分段保留待续跑重新合成。"""
         tmp_out = _merging_tmp(final)
         try:
             final.parent.mkdir(parents=True, exist_ok=True)
-            segs = sorted(parts_dir.glob("seg_*.mp4"))
             lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:4"]
-            for s in segs:
-                idx = int(s.stem.split("_")[1])
-                dur = durs[idx] if idx < len(durs) else 0.0
+            for i, dur in enumerate(durs):
                 lines.append(f"#EXTINF:{max(dur, 0.001):.3f},")
-                lines.append(s.name)
+                lines.append(self._seg_path(parts_dir, i).name)
             lines.append("#EXT-X-ENDLIST")
             list_file = parts_dir / "local.m3u8"
             list_file.write_text("\n".join(lines) + "\n", encoding="ascii")
@@ -546,13 +556,28 @@ class DownloadManager:
                    "-allowed_extensions", "ALL", "-protocol_whitelist", "file",
                    "-i", list_file.name,
                    "-c", "copy", str(tmp_out.resolve())]
-            proc = subprocess.run(cmd, cwd=parts_dir, capture_output=True, text=True,
-                                  timeout=3600)
+            proc = subprocess.Popen(cmd, cwd=parts_dir, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE, text=True)
+            stderr = ""
+            deadline = time.monotonic() + 3600
+            while True:
+                try:
+                    stderr = proc.communicate(timeout=0.5)[1] or ""
+                    break
+                except subprocess.TimeoutExpired:
+                    if not (stop_event.is_set() or time.monotonic() > deadline):
+                        continue
+                    proc.kill()
+                    proc.communicate()
+                    tmp_out.unlink(missing_ok=True)
+                    if stop_event.is_set():
+                        return False, "已暂停"
+                    return False, "合成超时（超过 1 小时）"
             if proc.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size == 0:
                 tmp_out.unlink(missing_ok=True)
-                return False, (proc.stderr or "").strip()[-400:] or "未知错误"
+                return False, stderr.strip()[-400:] or "未知错误"
             os.replace(tmp_out, final)
             return True, ""
-        except (OSError, subprocess.TimeoutExpired) as e:
+        except (OSError, subprocess.SubprocessError) as e:
             tmp_out.unlink(missing_ok=True)
             return False, str(e)
