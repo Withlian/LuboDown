@@ -50,6 +50,7 @@
     _apply(state) {
       if (!state) return;
       this.html.dataset.window = state.maximized ? "max" : "normal";
+      this.html.dataset.corners = state.native_corners ? "native" : "region";
       this.maxBtn.title = state.maximized ? "还原" : "最大化";
     }
   }

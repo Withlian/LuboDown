@@ -109,8 +109,9 @@ def _run():
     else:
         ui_base = Path(__file__).parent
 
-    # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角裁剪见 WindowFrame
+    # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角见 WindowFrame
     min_size = (980, 620)
+    native_corners = WindowFrame.native_corners()
     window = webview.create_window(
         f"LuboDown v{__version__} · B站直播回放下载",
         str(ui_base / "ui" / "index.html"),
@@ -118,7 +119,8 @@ def _run():
         width=1240, height=820,
         min_size=min_size,
         frameless=True, easy_drag=False,
-        shadow=False,   # 阴影会强制 DWM 绘制方形外框，使圆角裁剪在画面上失效
+        # 原生圆角依赖 DWM 绘制窗口框架（即 shadow）；区域裁剪方式下 DWM 框架会把窗口画成方形，须关闭
+        shadow=native_corners,
         background_color="#0A0A0A" if WindowFrame.system_dark() else "#FAFAFB",
     )
 

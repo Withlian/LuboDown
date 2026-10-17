@@ -22,14 +22,15 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 }
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
-/* ============ 外壳：铺满无边框窗口，四周圆角；最大化时贴边改直角 ============ */
+/* ============ 外壳：铺满无边框窗口，四周圆角；最大化时贴边改直角 ============
+   系统原生圆角（Win11）时圆角与边框由系统绘制，外壳不再自带，避免双层边框 */
 .shell {
   position: fixed; inset: 0; display: flex;
   background: var(--bg); overflow: hidden;
   border: 1px solid var(--border); border-radius: 20px;
   animation: shell-in .5s ease both;
 }
-[data-window="max"] .shell { border-radius: 0; border-width: 0; }
+[data-window="max"] .shell, [data-corners="native"] .shell { border-radius: 0; border-width: 0; }
 @keyframes shell-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* 窗口按钮：固定在右上角，悬浮于主区域/右侧面板之上 */

@@ -1,7 +1,12 @@
 """LuboDown —— 无边框圆角窗口的原生行为。
 
 隐藏系统标题栏后，窗口按钮由前端绘制；这里用 Win32 API 补回拖动、边缘缩放、
-最大化/还原（不遮挡任务栏），并用窗口区域把窗口裁成圆角矩形。
+最大化/还原（不遮挡任务栏），并让窗口呈圆角：
+
+- Win11（非远程桌面）：请求 DWM 原生圆角，边缘抗锯齿并带系统阴影与细边框。
+  依赖 DWM 绘制窗口框架，创建窗口时须 shadow=True（见 native_corners）。
+- 其他环境（Win10、远程桌面——系统在远程会话中关闭圆角）：用窗口区域裁成圆角矩形。
+  区域只能按整像素裁剪，无抗锯齿与阴影，深色背景下角外会透出背后内容。
 
 不用颜色键透明：WebView2 内容不在窗体的分层表面里，整个窗口都会被判定为透明而点击穿透；
 窗口区域则同时裁剪显示与命中测试，圆角外侧穿透、内侧正常响应。
@@ -9,6 +14,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
 import time
 import winreg
@@ -37,8 +43,9 @@ _gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
 
 SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
 MONITOR_DEFAULTTONEAREST = 2
-SM_SWAPBUTTON, SM_CXDRAG, SM_CYDRAG = 23, 68, 69
+SM_SWAPBUTTON, SM_CXDRAG, SM_CYDRAG, SM_REMOTESESSION = 23, 68, 69, 0x1000
 DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED = 2, 1
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND = 33, 1, 2
 
 
 class WindowFrame:
@@ -55,7 +62,14 @@ class WindowFrame:
         self._maximized = False
         self._normal = None          # 最大化前的窗口矩形
         self._region_size = None     # 上次裁剪时的窗口尺寸，尺寸不变不重复设置
+        self._corner_pref = None     # 上次设置的 DWM 圆角偏好
+        self._native = self.native_corners()
         self._tracking = threading.Lock()   # 同一时刻只跟随一次拖动/缩放
+
+    @staticmethod
+    def native_corners() -> bool:
+        """能否用 DWM 原生圆角：Win11（build 22000+）且不在远程桌面会话中。"""
+        return sys.getwindowsversion().build >= 22000 and not _user32.GetSystemMetrics(SM_REMOTESESSION)
 
     @staticmethod
     def system_dark() -> bool:
@@ -69,22 +83,18 @@ class WindowFrame:
 
     # ============ 初始化 ============
     def attach(self) -> None:
-        """窗体创建后、显示前调用（before_show 事件）：裁出圆角，并在尺寸变化时重裁。"""
+        """窗体创建后、显示前调用（before_show 事件）：设置圆角，区域裁剪方式下尺寸变化时重裁。"""
         if self._hwnd:
             return
         self._hwnd = wintypes.HWND(int(self._window.native.Handle.ToInt64()))
-        # 关闭 DWM 非客户区绘制：开启时 DWM 按方形窗口矩形渲染，窗口区域只裁剪点击不裁剪画面
-        policy = ctypes.c_int(DWMNCRP_DISABLED)
-        try:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                self._hwnd, DWMWA_NCRENDERING_POLICY, ctypes.byref(policy), ctypes.sizeof(policy))
-        except OSError:
-            pass
-        self._window.events.resized += self._update_region
-        self._update_region()
+        if not self._native:
+            # 关闭 DWM 非客户区绘制：开启时 DWM 按方形窗口矩形渲染，窗口区域只裁剪点击不裁剪画面
+            self._dwm_set(DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED)
+            self._window.events.resized += self._update_shape
+        self._update_shape()
 
     def state(self) -> dict:
-        return {"maximized": self._maximized}
+        return {"maximized": self._maximized, "native_corners": self._native}
 
     # ============ 窗口按钮 ============
     def minimize(self) -> None:
@@ -100,7 +110,7 @@ class WindowFrame:
             self._normal = self._rect()
             self._maximized = True
             self._move_to(*self._work_area())
-        self._update_region()
+        self._update_shape()
         return self.state()
 
     def close(self) -> None:
@@ -149,7 +159,7 @@ class WindowFrame:
                 if rect != last:
                     self._move_to(*rect)
                     if edge:
-                        self._update_region()
+                        self._update_shape()
                     last = rect
                 time.sleep(1 / self.TRACK_HZ)
         finally:
@@ -175,9 +185,28 @@ class WindowFrame:
         left = int(x - w * (x - l) / max(1, r - l))
         self._maximized = False
         self._move_to(left, t, left + w, t + h)
-        self._update_region()
+        self._update_shape()
 
     # ============ Win32 辅助 ============
+    def _update_shape(self) -> None:
+        """按当前状态更新圆角：原生方式最大化时取消圆角，区域方式按尺寸重裁。"""
+        if not self._hwnd:
+            return
+        if not self._native:
+            self._update_region()
+            return
+        pref = DWMWCP_DONOTROUND if self._maximized else DWMWCP_ROUND
+        if pref != self._corner_pref:
+            self._corner_pref = pref
+            self._dwm_set(DWMWA_WINDOW_CORNER_PREFERENCE, pref)
+
+    def _dwm_set(self, attr: int, value: int) -> None:
+        v = ctypes.c_int(value)
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(self._hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+        except OSError:
+            pass
+
     def _update_region(self) -> None:
         """按当前尺寸裁出圆角；最大化时取消裁剪贴满工作区。"""
         if not self._hwnd or _user32.IsIconic(self._hwnd):
