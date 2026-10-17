@@ -5,17 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LuboDown · B站直播回放下载</title>
 <script>
-  /* 首帧前确定主题，避免闪烁：本地偏好 > 系统设置 */
+  /* 首帧前确定主题与侧边栏状态，避免闪烁：本地偏好 > 系统设置 */
   (function () {
-    var t = null;
-    try { t = localStorage.getItem("lubo-theme"); } catch (e) {}
+    var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+    var t = get("lubo-theme");
     if (t !== "light" && t !== "dark") {
       t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
     document.documentElement.dataset.theme = t;
+    document.documentElement.dataset.sidebar = get("lubo-sidebar") === "expanded" ? "expanded" : "collapsed";
   })();
 </script>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/pages.css">
 </head>
 <body>
 <!-- 图标（lucide，内联以便离线使用） -->
@@ -43,120 +47,138 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
     <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
-    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
     <symbol id="i-video" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
-    <symbol id="i-calendar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></symbol>
     <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></symbol>
     <symbol id="i-drive" viewBox="0 0 24 24"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></symbol>
     <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
     <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
-    <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12" rx="2.5"/><path d="M8 8V6.5A2.5 2.5 0 0 1 10.5 4h7A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H16"/></symbol>
+    <symbol id="i-inbox"viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
   </defs>
 </svg>
 
-<div id="app">
-  <!-- ============ 侧边栏 ============ -->
-  <aside class="sidebar">
-    <div class="logo">
-      <div class="logo-icon"><svg class="ico"><use href="#i-arrow-down"/></svg></div>
-      <div>
-        <div class="logo-name">LuboDown</div>
-        <div class="logo-sub">B站直播回放下载</div>
-      </div>
+<div class="shell" id="shell" data-page="sessions">
+  <!-- ============ 侧边栏（浮动紫色图标栏，可展开） ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-logo" data-drag>
+      <span class="sb-mark"><svg class="ico"><use href="#i-arrow-down"/></svg></span>
+      <span class="sb-label sb-brand">LuboDown</span>
     </div>
-
-    <div class="nav-title">导航</div>
-    <nav id="nav">
-      <span class="nav-pill" id="nav-pill"></span>
-      <button class="nav-item active" data-page="sessions">
-        <svg class="ico"><use href="#i-list"/></svg><span>回放列表</span>
+    <nav class="sb-nav">
+      <span class="sb-pill" id="sb-pill"></span>
+      <button class="sb-item active" data-page="sessions" data-tip="回放列表">
+        <svg class="ico"><use href="#i-list"/></svg><span class="sb-label">回放列表</span>
       </button>
-      <button class="nav-item" data-page="schedule">
-        <svg class="ico"><use href="#i-clock"/></svg><span>定时任务</span>
+      <button class="sb-item" data-page="schedule" data-tip="定时任务">
+        <svg class="ico"><use href="#i-clock"/></svg><span class="sb-label">定时任务</span>
       </button>
-      <button class="nav-item" data-page="settings">
-        <svg class="ico"><use href="#i-settings"/></svg><span>设置</span>
+      <button class="sb-item" data-page="settings" data-tip="设置">
+        <svg class="ico"><use href="#i-settings"/></svg><span class="sb-label">设置</span>
       </button>
     </nav>
-
-    <div class="sidebar-foot">
-      <div class="nav-title">状态</div>
-      <div class="foot-row"><span class="dot" id="dot-cookie"></span><span id="foot-cookie">Cookie 未配置</span></div>
-      <div class="foot-row"><span class="dot" id="dot-ffmpeg"></span><span id="foot-ffmpeg">ffmpeg 检测中…</span></div>
-      <div class="foot-bottom">
-        <span class="foot-tip">关闭窗口即最小化到托盘</span>
-        <button class="icon-btn" id="btn-theme" title="切换亮色/暗色">
+    <div class="sb-bottom">
+      <button class="sb-item" id="btn-theme" data-tip="切换亮色/暗色">
+        <span class="theme-ico">
           <svg class="ico ico-sun"><use href="#i-sun"/></svg>
           <svg class="ico ico-moon"><use href="#i-moon"/></svg>
-        </button>
-      </div>
+        </span><span class="sb-label">切换主题</span>
+      </button>
+      <button class="sb-item" id="btn-sidebar" data-tip="展开侧边栏（Ctrl+B）">
+        <svg class="ico"><use href="#i-panel-left"/></svg><span class="sb-label">收起侧边栏</span>
+      </button>
     </div>
   </aside>
 
   <!-- ============ 主区域 ============ -->
   <main class="main" id="main">
+    <header class="topbar" data-drag>
+      <div class="crumb">
+        <span class="crumb-top">LuboDown</span>
+        <h1 id="page-title">回放列表</h1>
+      </div>
+      <div class="topbar-right">
+        <label class="search" data-only="sessions">
+          <svg class="ico"><use href="#i-search"/></svg>
+          <input type="text" id="search" placeholder="搜索直播标题或主播…" autocomplete="off">
+        </label>
+        <div class="status-pill">
+          <span class="status-item" id="st-cookie"><span class="dot"></span>Cookie</span>
+          <span class="status-item" id="st-ffmpeg"><span class="dot"></span>ffmpeg</span>
+        </div>
+      </div>
+    </header>
+
     <!-- 回放列表页 -->
     <section id="page-sessions" class="page active">
-      <header class="page-head">
-        <div>
-          <h1>回放列表</h1>
-          <p class="sub">仅保留最近约 14 天的回放，建议开启定时自动下载</p>
+      <div class="hero-row">
+        <div class="hero">
+          <div class="hero-head"><span>概览</span><span class="hero-range">近 14 天开播场次</span></div>
+          <svg class="spark" id="hero-chart" viewBox="0 0 600 120" preserveAspectRatio="none">
+            <path class="spark-area"/><path class="spark-line"/>
+          </svg>
+          <div class="spark-axis" id="hero-axis"></div>
+          <div class="hero-stats">
+            <div class="hero-stat"><span>全部场次</span><b id="stat-total">0</b></div>
+            <div class="hero-stat hl"><span>进行中</span><b id="stat-active">0</b></div>
+            <div class="hero-stat"><span>已完成</span><b id="stat-done">0</b></div>
+            <div class="hero-stat"><span>待处理</span><b id="stat-pending">0</b></div>
+          </div>
         </div>
-        <div class="head-actions">
-          <div class="select-wrap"><select id="sel-anchor-filter" title="按主播筛选"></select></div>
-          <button class="btn ghost" id="btn-sort" title="切换排序"><svg class="ico"><use href="#i-sort"/></svg><span>时间 ↓</span></button>
-          <button class="btn secondary" id="btn-refresh"><svg class="ico"><use href="#i-refresh"/></svg><span>刷新列表</span></button>
-          <button class="btn primary" id="btn-check"><svg class="ico"><use href="#i-search"/></svg><span>立即检查新回放</span></button>
-        </div>
-      </header>
-
-      <div class="metrics">
-        <div class="card metric">
-          <div class="metric-top"><span>全部场次</span><svg class="ico accent"><use href="#i-video"/></svg></div>
-          <div class="metric-val" id="stat-total">0</div>
-          <div class="metric-sub">近 14 天回放</div>
-        </div>
-        <div class="card metric">
-          <div class="metric-top"><span>进行中</span><svg class="ico accent"><use href="#i-activity"/></svg></div>
-          <div class="metric-val" id="stat-active">0</div>
-          <div class="metric-sub" id="stat-active-sub">排队 / 下载 / 合成</div>
-        </div>
-        <div class="card metric">
-          <div class="metric-top"><span>已完成</span><svg class="ico success"><use href="#i-check"/></svg></div>
-          <div class="metric-val" id="stat-done">0</div>
-          <div class="metric-sub success">已保存到本地</div>
-        </div>
-        <div class="card metric">
-          <div class="metric-top"><span>待处理</span><svg class="ico warning"><use href="#i-alert"/></svg></div>
-          <div class="metric-val" id="stat-pending">0</div>
-          <div class="metric-sub" id="stat-pending-sub">未下载 / 暂停 / 失败</div>
+        <div class="quick-col">
+          <button class="quick quick-primary" id="btn-check">
+            <span class="quick-ico"><svg class="ico"><use href="#i-search"/></svg></span>
+            <span class="quick-text"><b>检查新回放</b><small id="quick-next">下次检查 —</small></span>
+          </button>
+          <div class="quick quick-soft">
+            <div class="quick-top">
+              <span class="quick-ico"><svg class="ico"><use href="#i-download"/></svg></span><b>下载队列</b>
+            </div>
+            <svg class="spark spark-mini" id="speed-chart" viewBox="0 0 300 60" preserveAspectRatio="none">
+              <path class="spark-area"/><path class="spark-line"/>
+            </svg>
+            <div class="quick-bottom">
+              <div class="quick-stat">
+                <small>当前速度</small>
+                <strong id="dl-speed">空闲</strong>
+                <small class="quick-sub" id="dl-title">暂无进行中的任务</small>
+              </div>
+              <button class="round-btn" id="btn-open-dir" title="打开下载目录"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div id="session-list" class="session-list">
-        <div class="empty">加载中…</div>
+      <div class="list-head">
+        <h2>回放场次 <span class="count" id="list-count">0</span></h2>
+        <div class="list-tools">
+          <div class="tabs" id="status-tabs">
+            <span class="tabs-pill"></span>
+            <button class="tab active" data-value="all">全部</button>
+            <button class="tab" data-value="active">进行中</button>
+            <button class="tab" data-value="done">已完成</button>
+            <button class="tab" data-value="pending">待处理</button>
+          </div>
+          <button class="btn ghost small" id="btn-sort" title="切换排序"><svg class="ico"><use href="#i-sort"/></svg><span>最新在前</span></button>
+          <button class="btn secondary small" id="btn-refresh"><svg class="ico"><use href="#i-refresh"/></svg><span>刷新列表</span></button>
+        </div>
       </div>
+      <div class="grid" id="session-grid"><div class="empty">加载中…</div></div>
     </section>
 
     <!-- 定时任务页 -->
     <section id="page-schedule" class="page">
-      <header class="page-head">
-        <div><h1>定时任务</h1><p class="sub">定时检查新场次；应用驻留后台时照常运行</p></div>
-      </header>
-
       <div class="grid-2">
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-clock"/></svg></span>
-            <div class="card-title">定时检查</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-clock"/></svg></span><h3>定时检查</h3></div>
           <p class="desc">每间隔指定时间自动拉取回放列表，发现新场次记入列表。</p>
           <div class="row">
-            <label class="switch">
-              <input type="checkbox" id="sw-auto-check">
-              <span class="slider"></span>
-            </label>
+            <label class="switch"><input type="checkbox" id="sw-auto-check"><span class="slider"></span></label>
             <span id="auto-check-label" class="row-label">已启用</span>
           </div>
           <div class="row">
@@ -173,26 +195,17 @@
               </select>
             </div>
           </div>
-          <div class="row">
-            <span class="row-label fixed">下次检查</span>
-            <span class="mono next-run" id="next-run">—</span>
-          </div>
+          <div class="row"><span class="row-label fixed">下次检查</span><span class="next-run" id="next-run">—</span></div>
           <div class="card-foot">
             <button class="btn primary" id="btn-check-2"><svg class="ico"><use href="#i-search"/></svg><span>立即检查</span></button>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-zap"/></svg></span>
-            <div class="card-title">自动下载</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-zap"/></svg></span><h3>自动下载</h3></div>
           <p class="desc">检查到<b>新场次</b>且录像已生成时，自动开始下载（切片流并发下载后由 ffmpeg 无损合成，约 20GB/4.5 小时场）。</p>
           <div class="row">
-            <label class="switch">
-              <input type="checkbox" id="sw-auto-download">
-              <span class="slider"></span>
-            </label>
+            <label class="switch"><input type="checkbox" id="sw-auto-download"><span class="slider"></span></label>
             <span id="auto-download-label" class="row-label">已关闭</span>
           </div>
           <div class="row">
@@ -208,39 +221,29 @@
       </div>
 
       <div class="card log-card">
-        <div class="card-head">
-          <span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span>
-          <div class="card-title">运行日志</div>
-        </div>
+        <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span><h3>运行日志</h3></div>
         <div id="log-box" class="log-box"></div>
       </div>
     </section>
 
     <!-- 设置页 -->
     <section id="page-settings" class="page">
-      <header class="page-head">
-        <div><h1>设置</h1><p class="sub">凭证保存在本机 config/settings.json，不会上传</p></div>
-      </header>
-
       <div class="grid-2">
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-key"/></svg></span>
-            <div class="card-title">B站凭证</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-key"/></svg></span><h3>B站凭证</h3></div>
           <p class="desc">浏览器登录 B 站后，F12 → 应用/Application → Cookie → 找到
-            <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；随时回来更新即可。</p>
+            <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；凭证只保存在本机。</p>
           <label class="field">
             <span>SESSDATA</span>
             <div class="pw-wrap">
-              <input type="password" id="in-sessdata" placeholder="" autocomplete="off">
+              <input type="password" id="in-sessdata" autocomplete="off">
               <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
             </div>
           </label>
           <label class="field">
             <span>bili_jct</span>
             <div class="pw-wrap">
-              <input type="password" id="in-bili-jct" placeholder="" autocomplete="off">
+              <input type="password" id="in-bili-jct" autocomplete="off">
               <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
             </div>
           </label>
@@ -252,12 +255,9 @@
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-user"/></svg></span>
-            <div class="card-title">关注的主播</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-users"/></svg></span><h3>关注的主播</h3></div>
           <p class="desc">需要该主播为你的账号开通回放剪辑权限，否则无法获取其回放。</p>
-          <div id="anchor-list" class="anchor-list"></div>
+          <div id="anchor-chips" class="anchor-chips"></div>
           <div class="row gap">
             <input type="text" id="in-uid" placeholder="输入主播 UID（space.bilibili.com 后的数字）" class="grow">
             <button class="btn primary" id="btn-add-anchor"><svg class="ico"><use href="#i-plus"/></svg><span>添加</span></button>
@@ -265,10 +265,7 @@
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-drive"/></svg></span>
-            <div class="card-title">下载</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-drive"/></svg></span><h3>下载</h3></div>
           <p class="desc">以下设置修改后<b>立即自动保存</b>。</p>
           <label class="field">
             <span>下载目录</span>
@@ -287,26 +284,17 @@
             </div>
           </div>
           <div class="row">
-            <label class="switch">
-              <input type="checkbox" id="sw-keep-parts">
-              <span class="slider"></span>
-            </label>
+            <label class="switch"><input type="checkbox" id="sw-keep-parts"><span class="slider"></span></label>
             <span class="row-label">合成后保留分段文件（便于修复）</span>
           </div>
           <div class="row">
-            <label class="switch">
-              <input type="checkbox" id="sw-name-anchor">
-              <span class="slider"></span>
-            </label>
+            <label class="switch"><input type="checkbox" id="sw-name-anchor"><span class="slider"></span></label>
             <span class="row-label">文件名附加主播名与开播时间（如 2026.10.3-01_主播名_19-59）</span>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span>
-            <div class="card-title">ffmpeg</div>
-          </div>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-terminal"/></svg></span><h3>ffmpeg</h3></div>
           <p class="desc">用于把分段无损合成为 MP4。默认使用项目内置的 <code>bin/ffmpeg.exe</code>，无需配置；也可指定其他路径（修改后自动保存）。</p>
           <label class="field">
             <span>可执行文件路径或命令名</span>
@@ -316,9 +304,58 @@
       </div>
     </section>
   </main>
+
+  <!-- ============ 右侧面板（仅回放列表页） ============ -->
+  <aside class="panel" id="panel">
+    <div class="panel-head" data-drag>
+      <h3><svg class="ico"><use href="#i-users"/></svg>主播</h3>
+      <button class="link" data-goto="settings">管理</button>
+    </div>
+    <div class="tabs tabs-block" id="panel-tabs">
+      <span class="tabs-pill"></span>
+      <button class="tab active" data-value="all">全部</button>
+      <button class="tab" data-value="busy">有任务</button>
+    </div>
+    <ul class="anchor-list" id="panel-anchors"></ul>
+    <div class="panel-card">
+      <div class="panel-card-head">
+        <span><svg class="ico"><use href="#i-terminal"/></svg>最近动态</span>
+        <button class="link" data-goto="schedule">查看</button>
+      </div>
+      <ul class="mini-log" id="panel-logs"></ul>
+    </div>
+  </aside>
+
+  <!-- ============ 窗口按钮与顶部拖动条（无边框窗口，缩放手柄由脚本生成） ============ -->
+  <div class="drag-strip" data-drag></div>
+  <div class="win-ctrls" data-drag>
+    <button class="win-btn" id="win-min" title="最小化"><svg class="ico"><use href="#i-minus"/></svg></button>
+    <button class="win-btn" id="win-max" title="最大化">
+      <svg class="ico ico-max"><use href="#i-square"/></svg><svg class="ico ico-restore"><use href="#i-restore"/></svg>
+    </button>
+    <button class="win-btn close" id="win-close" title="关闭到托盘"><svg class="ico"><use href="#i-x"/></svg></button>
+  </div>
 </div>
 
 <div id="toasts"></div>
-<script src="app.js"></script>
+
+<!-- 模块按依赖顺序加载：core → components → pages → app -->
+<script src="js/core/util.js"></script>
+<script src="js/core/motion.js"></script>
+<script src="js/core/api.js"></script>
+<script src="js/core/store.js"></script>
+<script src="js/components/toaster.js"></script>
+<script src="js/components/theme.js"></script>
+<script src="js/components/sidebar.js"></script>
+<script src="js/components/window-frame.js"></script>
+<script src="js/components/tabs.js"></script>
+<script src="js/components/sparkline.js"></script>
+<script src="js/components/session-card.js"></script>
+<script src="js/pages/page.js"></script>
+<script src="js/pages/sessions.js"></script>
+<script src="js/pages/side-panel.js"></script>
+<script src="js/pages/schedule.js"></script>
+<script src="js/pages/settings.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

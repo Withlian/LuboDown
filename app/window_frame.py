@@ -1,0 +1,208 @@
+"""LuboDown —— 无边框圆角窗口的原生行为。
+
+隐藏系统标题栏后，窗口按钮由前端绘制；这里用 Win32 API 补回拖动、边缘缩放、
+最大化/还原（不遮挡任务栏），并用窗口区域把窗口裁成圆角矩形。
+
+不用颜色键透明：WebView2 内容不在窗体的分层表面里，整个窗口都会被判定为透明而点击穿透；
+窗口区域则同时裁剪显示与命中测试，圆角外侧穿透、内侧正常响应。
+"""
+from __future__ import annotations
+
+import ctypes
+import threading
+import time
+import winreg
+from ctypes import wintypes
+
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_gdi32 = ctypes.WinDLL("gdi32")
+_user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                 ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+_user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+_user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+_user32.MonitorFromWindow.restype = wintypes.HMONITOR
+_user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+_user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MonitorInfo)]
+_user32.GetDpiForWindow.argtypes = [wintypes.HWND]
+_user32.IsIconic.argtypes = [wintypes.HWND]
+_user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+_gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
+_gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
+
+SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
+MONITOR_DEFAULTTONEAREST = 2
+SM_SWAPBUTTON = 23
+DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED = 2, 1
+
+
+class WindowFrame:
+    """前端窗口按钮背后的原生实现；公开方法可在任意线程调用。"""
+
+    TRACK_HZ = 120
+    RADIUS = 20          # 与 base.css 中 .shell 的圆角一致（逻辑像素）
+
+    def __init__(self, window, min_size: tuple[int, int], on_close):
+        self._window = window
+        self._min_size = min_size
+        self._on_close = on_close
+        self._hwnd = None
+        self._maximized = False
+        self._normal = None          # 最大化前的窗口矩形
+        self._region_size = None     # 上次裁剪时的窗口尺寸，尺寸不变不重复设置
+        self._tracking = threading.Lock()   # 同一时刻只跟随一次拖动/缩放
+
+    @staticmethod
+    def system_dark() -> bool:
+        """系统是否为深色应用模式：用于窗口底色，避免页面加载前闪一下反色。"""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+                return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+        except OSError:
+            return False
+
+    # ============ 初始化 ============
+    def attach(self) -> None:
+        """窗体创建后、显示前调用（before_show 事件）：裁出圆角，并在尺寸变化时重裁。"""
+        if self._hwnd:
+            return
+        self._hwnd = wintypes.HWND(int(self._window.native.Handle.ToInt64()))
+        # 关闭 DWM 非客户区绘制：开启时 DWM 按方形窗口矩形渲染，窗口区域只裁剪点击不裁剪画面
+        policy = ctypes.c_int(DWMNCRP_DISABLED)
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                self._hwnd, DWMWA_NCRENDERING_POLICY, ctypes.byref(policy), ctypes.sizeof(policy))
+        except OSError:
+            pass
+        self._window.events.resized += self._update_region
+        self._update_region()
+
+    def state(self) -> dict:
+        return {"maximized": self._maximized}
+
+    # ============ 窗口按钮 ============
+    def minimize(self) -> None:
+        self._window.minimize()
+
+    def toggle_maximize(self) -> dict:
+        if not self._hwnd:
+            return self.state()
+        if self._maximized:
+            self._maximized = False
+            self._move_to(*self._normal)
+        else:
+            self._normal = self._rect()
+            self._maximized = True
+            self._move_to(*self._work_area())
+        self._update_region()
+        return self.state()
+
+    def close(self) -> None:
+        self._on_close()
+
+    # ============ 拖动与缩放 ============
+    # 按住鼠标期间轮询光标并 SetWindowPos 跟随：不依赖系统移动循环，
+    # 由前端 mousedown 经 JS API（后台线程）触发也能稳定工作。
+    def drag(self) -> dict:
+        """按住标题区拖动；最大化时先按光标所在比例还原再跟随。"""
+        if not self._hwnd or not self._button_down():
+            return self.state()
+        if self._maximized:
+            x, _ = self._cursor()
+            l, t, r, _ = self._rect()
+            nl, nt, nr, nb = self._normal
+            w, h = nr - nl, nb - nt
+            left = int(x - w * (x - l) / max(1, r - l))
+            self._maximized = False
+            self._move_to(left, t, left + w, t + h)
+            self._update_region()
+        self._track("")
+        return self.state()
+
+    def resize(self, edge: str) -> None:
+        """按住边缘缩放；edge 为 n/s/e/w 及其组合（如 "se"）。"""
+        if self._hwnd and not self._maximized and self._button_down():
+            self._track(edge)
+
+    def _track(self, edge: str) -> None:
+        """跟随光标移动（edge 为空）或缩放窗口，直到松开鼠标。"""
+        if not self._tracking.acquire(blocking=False):
+            return
+        try:
+            l, t, r, b = self._rect()
+            sx, sy = self._cursor()
+            scale = self._scale()
+            min_w, min_h = (int(v * scale) for v in self._min_size)
+            last = None
+            while self._button_down():
+                x, y = self._cursor()
+                dx, dy = x - sx, y - sy
+                if not edge:
+                    rect = (l + dx, t + dy, r + dx, b + dy)
+                else:
+                    rect = (
+                        min(l + dx, r - min_w) if "w" in edge else l,
+                        min(t + dy, b - min_h) if "n" in edge else t,
+                        max(r + dx, l + min_w) if "e" in edge else r,
+                        max(b + dy, t + min_h) if "s" in edge else b,
+                    )
+                if rect != last:
+                    self._move_to(*rect)
+                    if edge:
+                        self._update_region()
+                    last = rect
+                time.sleep(1 / self.TRACK_HZ)
+        finally:
+            self._tracking.release()
+
+    # ============ Win32 辅助 ============
+    def _update_region(self) -> None:
+        """按当前尺寸裁出圆角；最大化时取消裁剪贴满工作区。"""
+        if not self._hwnd or _user32.IsIconic(self._hwnd):
+            return
+        l, t, r, b = self._rect()
+        size = (r - l, b - t, self._maximized)
+        if size == self._region_size:
+            return
+        self._region_size = size
+        if self._maximized:
+            _user32.SetWindowRgn(self._hwnd, None, True)
+            return
+        d = round(self.RADIUS * 2 * self._scale())
+        rgn = _gdi32.CreateRoundRectRgn(0, 0, r - l + 1, b - t + 1, d, d)
+        _user32.SetWindowRgn(self._hwnd, rgn, True)   # 成功后区域归系统所有，无需释放
+
+    def _scale(self) -> float:
+        return (_user32.GetDpiForWindow(self._hwnd) or 96) / 96
+
+    def _rect(self) -> tuple[int, int, int, int]:
+        rc = wintypes.RECT()
+        _user32.GetWindowRect(self._hwnd, ctypes.byref(rc))
+        return rc.left, rc.top, rc.right, rc.bottom
+
+    def _work_area(self) -> tuple[int, int, int, int]:
+        info = _MonitorInfo(cbSize=ctypes.sizeof(_MonitorInfo))
+        mon = _user32.MonitorFromWindow(self._hwnd, MONITOR_DEFAULTTONEAREST)
+        _user32.GetMonitorInfoW(mon, ctypes.byref(info))
+        rc = info.rcWork
+        return rc.left, rc.top, rc.right, rc.bottom
+
+    def _move_to(self, l: int, t: int, r: int, b: int) -> None:
+        _user32.SetWindowPos(self._hwnd, None, l, t, r - l, b - t, SWP_NOZORDER | SWP_NOACTIVATE)
+
+    @staticmethod
+    def _cursor() -> tuple[int, int]:
+        pt = wintypes.POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        return pt.x, pt.y
+
+    @staticmethod
+    def _button_down() -> bool:
+        vk = 0x02 if _user32.GetSystemMetrics(SM_SWAPBUTTON) else 0x01   # 左右键互换时主键为 VK_RBUTTON
+        return bool(_user32.GetAsyncKeyState(vk) & 0x8000)

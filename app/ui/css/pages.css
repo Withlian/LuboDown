@@ -1,0 +1,163 @@
+/* 页面：回放列表（主视觉卡、快捷卡、场次卡片网格）、右侧面板、定时任务与设置 */
+
+/* ============ 主视觉卡：紫色渐变 + 粉色曲线 ============ */
+.hero-row { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 18px; margin-bottom: 26px; }
+.hero {
+  display: flex; flex-direction: column; padding: 20px 22px 18px;
+  background: var(--grad-primary); color: #FFFFFF;
+  border-radius: 26px; box-shadow: var(--shadow-primary);
+}
+.hero-head { display: flex; justify-content: space-between; align-items: center; font-size: 15px; font-weight: 600; }
+.hero-range { font-size: 12.5px; font-weight: 500; opacity: .75; }
+
+.spark { display: block; width: 100%; height: 112px; margin-top: 10px; overflow: visible; }
+.spark path { transition: d .8s var(--ease); }
+.spark-line { fill: none; stroke: #FFFFFF; stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 4px 6px #A0234E40); }
+.spark-area { fill: #FFFFFF24; stroke: none; }
+.spark-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; opacity: .6; font-variant-numeric: tabular-nums; }
+
+.hero-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.hero-stat {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 12px 8px; border-radius: 18px; border: 1px solid #FFFFFF2E; background: #FFFFFF1F; text-align: center;
+  transition: background-color .3s, border-color .3s;
+}
+.hero-stat span { font-size: 14px; font-weight: 500; opacity: .8; }
+.hero-stat b { font-size: 30px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+
+/* ============ 快捷卡：紫色操作卡 + 粉色下载卡 ============ */
+.quick-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.quick { border: 0; border-radius: 26px; padding: 18px 20px; color: #FFFFFF; text-align: left; }
+.quick-ico {
+  width: 46px; height: 46px; flex-shrink: 0; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center; background: #FFFFFF33;
+}
+.quick-ico .ico { width: 20px; height: 20px; }
+.quick-primary {
+  display: flex; align-items: center; gap: 14px; cursor: pointer;
+  background: var(--grad-primary); box-shadow: var(--shadow-primary);
+  transition: transform .3s var(--ease), box-shadow .3s var(--ease);
+}
+.quick-primary:hover { transform: translateY(-2px); }
+.quick-primary:active { transform: scale(.98); }
+.quick-primary.loading .quick-ico .ico { animation: spin 1s linear infinite; }
+.quick-text b { display: block; font-size: 16px; font-weight: 600; }
+.quick-text small { font-size: 12.5px; opacity: .8; font-variant-numeric: tabular-nums; }
+/* 下载卡：白底粉色曲线，与粉色卡片形成粉白对比 */
+.quick-soft { flex: 1; display: flex; flex-direction: column; background: var(--surface); color: var(--fg); box-shadow: var(--shadow-sm); }
+.quick-soft .quick-ico { background: var(--primary-soft); color: var(--primary-text); }
+.quick-soft .quick-stat small { color: var(--fg-2); opacity: 1; }
+.quick-soft .round-btn { border-color: var(--primary); color: var(--primary-text); }
+.quick-soft .round-btn:hover { background: var(--primary-soft); }
+.quick-top { display: flex; align-items: center; gap: 12px; font-size: 16px; }
+.quick-top b { font-weight: 600; }
+.spark-mini { height: 46px; margin: 6px 0 4px; }
+.spark-mini .spark-line { stroke: var(--primary); filter: none; stroke-width: 2.5; }
+.spark-mini .spark-area { fill: var(--primary-soft); }
+.quick-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: auto; }
+.quick-stat { min-width: 0; }
+.quick-stat small { display: block; font-size: 12px; opacity: .85; }
+.quick-stat strong { display: block; font-size: 24px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.quick-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ============ 场次列表 ============ */
+.list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.list-head h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700; }
+.count {
+  min-width: 26px; height: 22px; padding: 0 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary-soft); color: var(--primary-text); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.list-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 40px 18px; padding-top: 34px; }
+.slot { min-width: 0; animation: rise .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 35ms); }
+
+/* 场次卡：图标徽章压在卡片上沿（参考图），状态标签与操作按钮分列两角 */
+.sc {
+  position: relative; display: flex; flex-direction: column; height: 100%;
+  padding: 40px 18px 16px; text-align: center;
+  background: var(--surface); border: 1.5px solid transparent; border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .3s var(--ease), transform .3s var(--ease), border-color .3s;
+}
+.sc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.sc.is-active { border-color: color-mix(in srgb, var(--primary) 55%, transparent); }
+.sc-badge {
+  position: absolute; top: -28px; left: 50%; transform: translateX(-50%);
+  width: 56px; height: 56px; border-radius: 18px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-primary); color: #FFFFFF;
+  box-shadow: 0 8px 18px #F25D8E4D, 0 0 0 4px var(--bg);
+  transition: transform .4s var(--spring);
+}
+.sc:hover .sc-badge { transform: translate(-50%, -3px); }
+.sc-badge .ico { width: 22px; height: 22px; }
+.sc-badge img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: fade .5s ease both; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.sc > .chip { position: absolute; top: 12px; left: 12px; }
+.sc-actions { position: absolute; top: 9px; right: 9px; display: flex; gap: 2px; }
+.sc-title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-sub { margin-top: 2px; font-size: 12px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-sub b { color: var(--primary-text); font-weight: 500; }
+.sc-progress { margin-top: 14px; text-align: left; }
+.sc-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: var(--fg-2); }
+.sc-pct { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 12px; }
+.sc-meta { min-width: 0; font-size: 11.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.sc-err {
+  margin-top: 10px; padding: 6px 10px; border-radius: 10px; text-align: left;
+  font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--err-bg); color: var(--err-fg);
+}
+.sc-err.soft { background: var(--surface-2); color: var(--fg-2); }
+
+/* ============ 右侧面板 ============ */
+.panel-head { display: flex; align-items: center; justify-content: space-between; }
+.panel-head h3 { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; }
+.panel-head h3 .ico { width: 18px; height: 18px; color: var(--primary-text); }
+
+.anchor-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; padding: 0 8px; }
+.anchor-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 9px 10px; border: 0; border-radius: 16px; background: transparent;
+  text-align: left; cursor: pointer;
+  transition: background-color .2s;
+  animation: rise .45s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms);
+}
+.anchor-item:hover { background: var(--surface-2); }
+.anchor-item.active { background: var(--primary-soft); }
+.avatar {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #FFFFFF; font-size: 15px; font-weight: 600;
+  transition: transform .3s var(--spring);
+}
+.anchor-item:hover .avatar { transform: scale(1.06); }
+.avatar.all { background: var(--surface-3); color: var(--fg-2); }
+.avatar.all .ico { width: 18px; height: 18px; }
+.anchor-text { flex: 1; min-width: 0; }
+.anchor-text b { display: block; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.anchor-text small { display: block; font-size: 11.5px; color: var(--fg-2); }
+.anchor-item > .ico { color: var(--primary-text); opacity: 0; transform: scale(.6); transition: opacity .2s, transform .3s var(--spring); }
+.anchor-item.active > .ico { opacity: 1; transform: none; }
+.panel-empty { padding: 24px 0; text-align: center; color: var(--fg-3); font-size: 12.5px; }
+
+.panel-card { margin-top: auto; padding: 14px 16px; border-radius: 20px; background: var(--surface-2); }
+.panel-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.panel-card-head span { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.panel-card-head .ico { width: 14px; height: 14px; color: var(--primary-text); }
+.mini-log li { display: flex; gap: 8px; padding: 4px 0; font-size: 11.5px; color: var(--fg-2); animation: log-in .4s var(--ease) both; }
+.mini-log .t { color: var(--fg-3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.mini-log .msg { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-log .error .msg { color: var(--err); }
+
+/* ============ 定时任务 / 设置 ============ */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.log-card { margin-top: 20px; }
+.next-run { font-size: 13px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .hero-row { grid-template-columns: 1fr; }
+}

@@ -24,6 +24,7 @@ from .bilibili import BiliClient
 from .downloader import DownloadManager
 from .scheduler import Scheduler
 from .store import LOG_FILE, Store
+from .window_frame import WindowFrame
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _kernel32.CreateMutexW.restype = ctypes.c_void_p
@@ -108,19 +109,29 @@ def _run():
     else:
         ui_base = Path(__file__).parent
 
+    # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角裁剪见 WindowFrame
+    min_size = (980, 620)
     window = webview.create_window(
         f"LuboDown v{__version__} · B站直播回放下载",
         str(ui_base / "ui" / "index.html"),
         js_api=api,
         width=1240, height=820,
-        min_size=(980, 620),
-        background_color="#0f1115",
+        min_size=min_size,
+        frameless=True, easy_drag=False,
+        shadow=False,   # 阴影会强制 DWM 绘制方形外框，使圆角裁剪在画面上失效
+        background_color="#0A0A0A" if WindowFrame.system_dark() else "#FAFAFB",
     )
-    api.attach(window, webview)
 
-    def on_closing(window):  # 参数名必须是 window，pywebview 才会注入窗口对象
+    def hide_to_tray():
         window.hide()
         store.log("窗口已最小化到托盘，任务继续运行")
+
+    frame = WindowFrame(window, min_size, hide_to_tray)
+    api.attach(window, webview, frame)
+    window.events.before_show += frame.attach
+
+    def on_closing(window):  # 参数名必须是 window，pywebview 才会注入窗口对象
+        hide_to_tray()
         return False  # 阻止真正关闭
 
     window.events.closing += on_closing

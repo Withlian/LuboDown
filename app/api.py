@@ -22,6 +22,7 @@ class Api:
         self._manager = manager
         self._scheduler = scheduler
         self._window = None  # main.py 启动后注入
+        self._frame = None
 
     # ============ 状态 ============
     def get_state(self) -> dict:
@@ -98,9 +99,29 @@ class Api:
             return {"ok": True, "path": result if isinstance(result, str) else result[0]}
         return {"ok": False, "message": "未选择"}
 
-    def attach(self, window, webview_module) -> None:
+    def attach(self, window, webview_module, frame) -> None:
         self._window = window
         self._webview_mod = webview_module
+        self._frame = frame
+
+    # ============ 窗口（无边框，按钮由前端绘制） ============
+    def window_state(self) -> dict:
+        return self._frame.state()
+
+    def window_minimize(self) -> None:
+        self._frame.minimize()
+
+    def window_toggle_maximize(self) -> dict:
+        return self._frame.toggle_maximize()
+
+    def window_close(self) -> None:
+        self._frame.close()
+
+    def window_drag(self) -> dict:
+        return self._frame.drag()
+
+    def window_resize(self, edge: str) -> None:
+        self._frame.resize(str(edge))
 
     # ============ 主播 ============
     def add_anchor(self, uid: int) -> dict:
