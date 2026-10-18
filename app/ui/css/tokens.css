@@ -41,12 +41,12 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* 深灰而非纯黑；背景与卡片/右侧面板拉开一档亮度，层次分明 */
-  --bg: #17161A;
-  --surface: #222126;
-  --surface-2: #2A292F;
-  --surface-3: #35343B;
-  --border: #322F36;
+  /* 蓝灰深色而非纯黑；背景与卡片/右侧面板拉开一档亮度，层次分明 */
+  --bg: #2B3135;
+  --surface: #343B41;
+  --surface-2: #3D454C;
+  --surface-3: #48525A;
+  --border: #434E55;
   --fg: #F2F2F2;
   --fg-2: #A8A5AD;
   --fg-3: #75727B;

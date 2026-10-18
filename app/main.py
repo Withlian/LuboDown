@@ -127,7 +127,7 @@ def _run():
         frameless=True, easy_drag=False,
         # 原生圆角依赖 DWM 绘制窗口框架（即 shadow）；区域裁剪方式下 DWM 框架会把窗口画成方形，须关闭
         shadow=native_corners,
-        background_color="#17161A" if WindowFrame.system_dark() else "#FAFAFB",   # 与 tokens.css 的 --bg 一致
+        background_color="#2B3135" if WindowFrame.system_dark() else "#FAFAFB",   # 与 tokens.css 的 --bg 一致
     )
 
     def hide_to_tray():
