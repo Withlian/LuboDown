@@ -81,7 +81,7 @@ def build_app():
     manager = DownloadManager(store, client)
     scheduler = Scheduler(store, client, manager)
     api = Api(store, client, manager, scheduler)
-    return store, scheduler, api
+    return store, manager, scheduler, api
 
 
 def run():
@@ -101,7 +101,7 @@ def _run():
             0, "LuboDown 已经在运行（请查看系统托盘）。", "LuboDown", 0x40)
         return
 
-    store, scheduler, api = build_app()
+    store, manager, scheduler, api = build_app()
     store.log(f"LuboDown v{__version__} 启动")
 
     if getattr(sys, "frozen", False):
@@ -158,6 +158,7 @@ def _run():
     def on_exit():
         exiting.set()
         store.log("退出 LuboDown")
+        manager.shutdown()
         try:
             icon.stop()
         except Exception:

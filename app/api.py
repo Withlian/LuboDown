@@ -106,8 +106,10 @@ class Api:
     def choose_folder(self) -> dict:
         if self._window is None:
             return {"ok": False, "message": "窗口未就绪"}
-        result = self._window.create_file_dialog(
-            self._webview_mod.FOLDER_DIALOG)  # noqa: attribute set in attach
+        # pywebview 5.1+ 为 FileDialog.FOLDER，旧常量 FOLDER_DIALOG 已弃用
+        dialogs = getattr(self._webview_mod, "FileDialog", None)
+        folder = dialogs.FOLDER if dialogs else self._webview_mod.FOLDER_DIALOG
+        result = self._window.create_file_dialog(folder)
         if result:
             return {"ok": True, "path": result if isinstance(result, str) else result[0]}
         return {"ok": False, "message": "未选择"}
@@ -216,7 +218,8 @@ class Api:
             f = self._store.resolve_session_file(rec)
             try:
                 root = self._store.download_root().resolve()
-                if f and f.exists() and root in f.resolve().parents:
+                # 下载目录改过后旧成品记为绝对路径、不在当前根目录下，按扩展名放行本场自己的成品
+                if f and f.exists() and (root in f.resolve().parents or f.suffix.lower() == ".mp4"):
                     f.unlink()
             except OSError as e:
                 return {"ok": False, "message": f"删除文件失败：{e}"}
@@ -228,13 +231,21 @@ class Api:
         return {"ok": True}
 
     # ============ 文件 ============
+    def _is_session_file(self, path: Path) -> bool:
+        """是否为某场次记录的成品文件（下载目录改过后旧成品可能在当前根目录之外）。"""
+        for rec in self._store.snapshot_sessions().values():
+            f = self._store.resolve_session_file(rec)
+            if f and f.resolve() == path:
+                return True
+        return False
+
     def open_path(self, target: str = "", select: bool = False) -> dict:
-        """打开下载目录或在资源管理器中定位文件。仅允许下载目录内的路径。"""
+        """打开下载目录或在资源管理器中定位文件。仅允许下载目录内的路径与场次记录的成品文件。"""
         try:
             root = self._store.download_root().resolve()
             if target:
                 rp = Path(target).resolve()
-                if root not in rp.parents:
+                if root not in rp.parents and not self._is_session_file(rp):
                     return {"ok": False, "message": "仅允许访问下载目录内的路径"}
                 if not rp.exists():
                     rp = root

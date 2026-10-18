@@ -148,11 +148,40 @@ class Store:
     # ---------- settings ----------
     def save_settings(self, patch: dict) -> None:
         with self._lock:
+            old_root = self.download_root()
             for k, v in patch.items():
                 if k in self.settings:
                     self.settings[k] = v
             self._normalize_download_dir()
             self._save(SETTINGS_FILE, self.settings)
+            if self.download_root() != old_root:
+                self._rebase_session_files(old_root)
+
+    def _rebase_session_files(self, old_root: Path) -> None:
+        """下载目录改动后修正已完成场次的文件路径：库中相对路径按当前根目录解析，
+        不修正的话旧目录里的成品会全部"找不到"（大小为 0、无法定位或删除）。
+        文件已随目录搬到新根目录下的保持相对；仍留在旧目录的改存绝对路径；
+        原本记为绝对路径、恰好落在新根目录内的转回相对。"""
+        new_root = self.download_root()
+        changed = False
+        for rec in self.sessions.values():
+            f = (rec.get("file") or "").strip()
+            if not f:
+                continue
+            p = Path(f)
+            if not p.is_absolute():
+                if (new_root / p).exists() or not (old_root / p).exists():
+                    continue
+                p = old_root / p
+            try:
+                value = str(p.relative_to(new_root))
+            except ValueError:
+                value = str(p)
+            if value != f:
+                rec["file"] = value
+                changed = True
+        if changed:
+            self._save(SESSIONS_FILE, self.sessions)
 
     def masked_settings(self) -> dict:
         """给前端的设置视图：凭证只回显尾号。"""

@@ -163,6 +163,7 @@ class DownloadManager:
         self.jobs: dict[str, Job] = {}
         self._queue: queue.Queue[tuple[str, Job]] = queue.Queue()
         self._lock = threading.Lock()
+        self._procs: set[subprocess.Popen] = set()   # 运行中的 ffmpeg，退出时一并结束
         # 启动时清理"幽灵状态"：上次进程退出时仍标记为进行中的场次，恢复为已暂停
         for key, rec in store.sessions.items():
             if rec.get("status") in ACTIVE_STATES:
@@ -227,6 +228,15 @@ class DownloadManager:
             if job and job.status not in ACTIVE_STATES:
                 del self.jobs[live_key]
 
+    def shutdown(self) -> None:
+        """程序退出前结束 ffmpeg 子进程：os._exit 不会带走子进程，残留的 ffmpeg
+        会继续占用合成临时文件，下次启动续跑时合成失败。"""
+        for proc in list(self._procs):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
     def purge_parts(self, live_key: str) -> None:
         """删除会话后清理其分段目录（带重试，失败记录日志）。
         按目录名在下载根目录下定位，主播改名后依然找得到。"""
@@ -239,6 +249,10 @@ class DownloadManager:
         """任务状态统一收口：内存 Job 与会话库同步更新，避免双写漂移。
         file 传成品绝对路径；库中存相对下载根目录的便携形式。"""
         job.status, job.error = status, error
+        if status != "downloading":
+            job.speed_bps = 0.0   # 停下后不再显示残留速度
+        if self.jobs.get(job.live_key) is not job:
+            return   # 暂停后已被新任务取代：旧任务收尾不能覆盖新任务写入的会话状态
         fields = {"status": status, "error": error}
         if file is not None:
             job.file = str(file)
@@ -564,21 +578,25 @@ class DownloadManager:
                                     stderr=subprocess.PIPE, text=True,
                                     encoding="utf-8", errors="replace",   # ffmpeg 输出 UTF-8，不能按系统 ANSI 编码解码
                                     creationflags=subprocess.CREATE_NO_WINDOW)
+            self._procs.add(proc)
             stderr = ""
             deadline = time.monotonic() + 3600
-            while True:
-                try:
-                    stderr = proc.communicate(timeout=0.5)[1] or ""
-                    break
-                except subprocess.TimeoutExpired:
-                    if not (stop_event.is_set() or time.monotonic() > deadline):
-                        continue
-                    proc.kill()
-                    proc.communicate()
-                    tmp_out.unlink(missing_ok=True)
-                    if stop_event.is_set():
-                        return False, "已暂停"
-                    return False, "合成超时（超过 1 小时）"
+            try:
+                while True:
+                    try:
+                        stderr = proc.communicate(timeout=0.5)[1] or ""
+                        break
+                    except subprocess.TimeoutExpired:
+                        if not (stop_event.is_set() or time.monotonic() > deadline):
+                            continue
+                        proc.kill()
+                        proc.communicate()
+                        tmp_out.unlink(missing_ok=True)
+                        if stop_event.is_set():
+                            return False, "已暂停"
+                        return False, "合成超时（超过 1 小时）"
+            finally:
+                self._procs.discard(proc)
             if proc.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size == 0:
                 tmp_out.unlink(missing_ok=True)
                 return False, stderr.strip()[-400:] or "未知错误"

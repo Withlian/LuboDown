@@ -45,12 +45,21 @@ def _doh_resolve(host: str) -> list[str]:
                 f"http://119.29.29.29/d?dn={host}"):
         try:
             with opener.open(doh, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
-            answer = data.get("Answer") or []
-            ips = [a["data"] for a in answer if isinstance(a, dict) and a.get("type") == 1]
+                text = resp.read().decode("utf-8", "replace").strip()
+            if text.startswith("{"):   # 阿里 DoH：JSON，Answer 里含 CNAME 链，只取 A 记录
+                answer = json.loads(text).get("Answer") or []
+                cands = [a.get("data") for a in answer if isinstance(a, dict) and a.get("type") == 1]
+            else:                      # 腾讯 HTTPDNS：纯文本 "ip1;ip2"
+                cands = text.split(";")
+            ips = []
+            for c in cands:
+                try:
+                    ips.append(str(ipaddress.IPv4Address(str(c).strip())))
+                except ValueError:
+                    continue
             if ips:
                 return ips
-        except (OSError, ValueError):  # 含 JSONDecodeError
+        except (OSError, ValueError, http.client.HTTPException):  # 含 JSONDecodeError
             continue
     return []
 
@@ -164,7 +173,8 @@ def request(url: str, cookie: str = "", timeout: int = 30, retries: int = 2,
             return obj
         except urllib.error.HTTPError as e:  # 403/404 等不重试
             raise ApiError(e.code, f"HTTP {e.code}: {url[:80]}") from e
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError,
+                http.client.HTTPException) as e:   # IncompleteRead 等读响应中断不是 OSError
             last_err = e
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
