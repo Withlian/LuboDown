@@ -2,7 +2,7 @@
 (function (Lubo) {
   "use strict";
 
-  const KEY = "lubo-theme";
+  const KEY = "lubo-theme";   // 与 index.html 头部内联脚本一致（内联须先执行，无法引用本文件）
 
   class ThemeController {
     constructor(button) {

@@ -36,7 +36,7 @@
       for (const s of state.sessions || []) {
         const st = stats.get(String(s.uid)) || { total: 0, busy: 0 };
         st.total++;
-        if (Lubo.StateStore.ACTIVE.has(s.status)) st.busy++;
+        if (Lubo.Status.ACTIVE.has(s.status)) st.busy++;
         stats.set(String(s.uid), st);
       }
       // 正在筛选的主播被移除后取消筛选，否则列表会一直停在已不存在的主播上

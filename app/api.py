@@ -6,20 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .downloader import resolve_ffmpeg
-from .store import ACTIVE_STATES
-
-# 数值设置的合法区间（前端下拉只提供其中常用档位）
-SETTING_RANGES = {
-    "check_interval_min": (5, 10_080),   # 定时检查间隔（分钟）
-    "concurrency": (1, 16),              # 分段下载并发数
-    "window_width": (980, 3840),         # 窗口大小（逻辑像素），下限与 main.py 的 min_size 一致
-    "window_height": (620, 2160),
-}
-
-
-def clamp_setting(key: str, value) -> int:
-    lo, hi = SETTING_RANGES[key]
-    return min(hi, max(lo, int(value)))
+from .store import ACTIVE_STATES, SETTING_SPECS, clamp_setting
 
 
 class Api:
@@ -42,7 +29,10 @@ class Api:
             fp = self._store.resolve_session_file(rec)
             view["file"] = str(fp) if fp else ""
             jv = jobs.get(rec["live_key"])
-            if jv:                       # 有任务记录则以内存实时视图覆盖（终态两处一致）
+            if jv and jv["status"] != "done":
+                # 进度数值只存在于内存 Job，进行中/暂停/失败以实时视图覆盖（queued 仅内存有）；
+                # done 之后以库记录为准——file 会随后续下载目录迁移被改写，
+                # Job 里完成时的绝对路径不跟着更新，覆盖会让界面指向旧位置
                 view.update({k: jv[k] for k in (
                     "status", "error", "total_segs", "done_segs", "done_bytes",
                     "total_bytes", "speed_bps", "percent")})
@@ -67,31 +57,26 @@ class Api:
 
     # ============ 设置 ============
     def save_settings(self, patch: dict) -> dict:
-        """空字符串表示保留原值；凭证不回传前端。"""
+        """按 SETTING_SPECS 的类型清洗前端 patch 后落库。
+        字符串留空=保留原值（凭证、ffmpeg_path）；download_dir 例外，空串表示恢复默认；
+        anchors 只经 add/remove_anchor 维护，不接受前端整包改写。"""
         clean: dict = {}
-        for key in ("sessdata", "bili_jct"):
-            v = (patch.get(key) or "").strip()
-            if v:
-                clean[key] = v
-        for key in SETTING_RANGES:
-            try:
-                if patch.get(key) is not None:
-                    clean[key] = clamp_setting(key, patch[key])
-            except (TypeError, ValueError):
-                pass
-        for key in ("auto_check", "auto_download", "keep_parts", "name_with_anchor"):
-            if key in patch:
-                clean[key] = bool(patch[key])
-        v = patch.get("auto_download_since")
-        if v is not None:
-            try:
-                clean["auto_download_since"] = max(0, int(v))
-            except (TypeError, ValueError):
-                pass
         if patch.get("download_dir") is not None:
             clean["download_dir"] = str(patch["download_dir"])   # 空串=恢复默认，save_settings 内部规范化
-        if patch.get("ffmpeg_path"):
-            clean["ffmpeg_path"] = str(patch["ffmpeg_path"]).strip()
+        for key, (default, _, _) in SETTING_SPECS.items():
+            if key not in patch or key == "download_dir" or isinstance(default, list):
+                continue
+            if isinstance(default, bool):
+                clean[key] = bool(patch[key])
+            elif isinstance(default, int):
+                try:
+                    clean[key] = clamp_setting(key, patch[key])
+                except (TypeError, ValueError):
+                    pass
+            else:
+                v = str(patch[key] or "").strip()
+                if v:
+                    clean[key] = v
         self._store.save_settings(clean)
         self._store.log("设置已保存"
                        + ("（含新凭证）" if ("sessdata" in clean or "bili_jct" in clean) else ""))

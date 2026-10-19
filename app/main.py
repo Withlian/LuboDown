@@ -19,11 +19,11 @@ import webview
 from PIL import Image, ImageDraw
 
 from . import __version__
-from .api import Api, clamp_setting
+from .api import Api
 from .bilibili import BiliClient
 from .downloader import DownloadManager
 from .scheduler import Scheduler
-from .store import LOG_FILE, Store
+from .store import LOG_FILE, SETTING_SPECS, Store, clamp_setting
 from .window_frame import WindowFrame
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -110,8 +110,8 @@ def _run():
         ui_base = Path(__file__).parent
 
     # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角见 WindowFrame
-    # 窗口大小固定（不能拖边缘或最大化），尺寸在设置中修改
-    min_size = (980, 620)
+    # 窗口大小固定（不能拖边缘或最大化），尺寸在设置中修改；下限取设置区间的下界
+    min_size = (SETTING_SPECS["window_width"][1], SETTING_SPECS["window_height"][1])
     native_corners = WindowFrame.native_corners()
     try:
         width = clamp_setting("window_width", store.settings.get("window_width"))

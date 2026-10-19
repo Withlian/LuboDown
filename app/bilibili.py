@@ -253,18 +253,30 @@ class BiliClient:
         return entries
 
     def verify_login(self) -> dict:
-        """用列表接口探测登录态与权限。返回 {ok, message}。"""
+        """用列表接口探测登录态与各主播的剪辑权限（逐个尝试，任一通过即可）。"""
         anchors = self.store.settings.get("anchors", [])
-        if not anchors:
-            return {"ok": False, "message": "未配置主播"}
-        try:
-            uid = int(anchors[0]["uid"])
-        except (KeyError, TypeError, ValueError):
-            return {"ok": False, "message": "主播配置异常，请在设置中重新添加"}
-        try:
-            self.get_replay_list(uid, page=1, page_size=1)
-            return {"ok": True, "message": "Cookie 有效，且具有目标主播的剪辑权限"}
-        except ApiError as e:
-            text = {-101: "SESSDATA 无效或已过期（账号未登录）",
-                    301: "已登录，但该主播未授权你的剪辑权限"}.get(e.code, e.message)
-            return {"ok": False, "message": text}
+        parsed = []
+        for a in anchors:
+            try:
+                parsed.append((int(a["uid"]), a.get("name") or str(a["uid"])))
+            except (KeyError, TypeError, ValueError):
+                continue    # 跳过配置中的异常条目
+        if not parsed:
+            return {"ok": False,
+                    "message": "未配置主播" if not anchors else "主播配置异常，请在设置中重新添加"}
+        denied: list[str] = []
+        last_err = ""
+        for uid, name in parsed:
+            try:
+                self.get_replay_list(uid, page=1, page_size=1)
+                return {"ok": True, "message": f"Cookie 有效，{name} 已授权剪辑权限"}
+            except ApiError as e:
+                if e.code == -101:   # 登录态全局无效，无需再试其余主播
+                    return {"ok": False, "message": "SESSDATA 无效或已过期（账号未登录）"}
+                if e.code == 301:
+                    denied.append(name)
+                else:
+                    last_err = e.message
+        if denied:
+            return {"ok": False, "message": f"已登录，但 {'、'.join(denied)} 未授权你的剪辑权限"}
+        return {"ok": False, "message": last_err or "检测失败"}

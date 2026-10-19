@@ -81,10 +81,13 @@ class Scheduler:
                 try:
                     uid = int(anchor["uid"])
                     name = anchor.get("name") or str(uid)
+                except (KeyError, TypeError, ValueError):
+                    uid, name = None, str(anchor)   # 配置异常的条目原样呈现
+                try:
                     items = self.client.fetch_all_replays(uid)
                 except Exception as e:
                     last_err = e
-                    self.store.log(f"获取主播 {anchor} 的回放列表失败：{e}", "error")
+                    self.store.log(f"获取主播 {name} 的回放列表失败：{e}", "error")
                     continue
                 fetched += 1
                 records = [_to_record(uid, name, it) for it in items if it.get("live_key")]

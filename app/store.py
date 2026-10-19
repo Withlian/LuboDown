@@ -23,22 +23,39 @@ LOG_FILE = CONFIG_DIR / "lubo.log"
 # 用户删除的场次在此期限内不再被检查重新入库（B 站回放只保留约 14 天，留足余量）
 DELETED_KEEP_SEC = 30 * 86400
 
-DEFAULT_SETTINGS = {
-    "sessdata": "",
-    "bili_jct": "",
-    "anchors": [],                  # 关注的主播，默认为空，需在设置中添加
-    "download_dir": "",             # 空 = 跟随程序所在目录下的 downloads
-    "check_interval_min": 60,       # 定时检查间隔（分钟）
-    "auto_check": True,             # 定时检查开关
-    "auto_download": False,         # 检查到新场次是否自动下载
-    "auto_download_since": 0,       # 仅自动下载该时间戳之后开播的场次（0=不限）
-    "concurrency": 6,               # 分段下载并发数
-    "keep_parts": False,            # 合成后是否保留分段文件
-    "name_with_anchor": False,      # 文件名附加主播名与开播时间
-    "ffmpeg_path": "ffmpeg",        # ffmpeg 可执行文件
-    "window_width": 1240,           # 窗口大小（逻辑像素，固定不可拖动调整，在设置中修改）
-    "window_height": 820,
+# 全部设置的单一权威定义：键 -> (默认值, 下限, 上限)。
+# 类型即默认值的类型（str/bool/int/list）；下限/上限仅对 int 有意义，None=不限。
+# DEFAULT_SETTINGS、api.save_settings 的类型清洗与 main.py 的窗口 min_size 均由此派生，
+# 新增设置在这里加一行（前端另加对应控件）即可。
+SETTING_SPECS = {
+    "sessdata": ("", None, None),           # 凭证，只存本机
+    "bili_jct": ("", None, None),
+    "anchors": ([], None, None),            # 关注的主播，只经 add/remove_anchor 增删
+    "download_dir": ("", None, None),       # 空 = 跟随程序所在目录下的 downloads，归一见 _normalize_download_dir
+    "check_interval_min": (60, 5, 10_080),  # 定时检查间隔（分钟）
+    "auto_check": (True, None, None),       # 定时检查开关
+    "auto_download": (False, None, None),   # 检查到新场次是否自动下载
+    "auto_download_since": (0, 0, None),    # 仅自动下载该时间戳之后开播的场次（0=不限）
+    "concurrency": (6, 1, 16),              # 分段下载并发数
+    "keep_parts": (False, None, None),      # 合成后是否保留分段文件
+    "name_with_anchor": (False, None, None),  # 文件名附加主播名与开播时间
+    "ffmpeg_path": ("ffmpeg", None, None),  # ffmpeg 可执行文件
+    "window_width": (1240, 980, 3840),      # 窗口大小（逻辑像素，固定不可拖动调整，在设置中修改）
+    "window_height": (820, 620, 2160),
 }
+
+DEFAULT_SETTINGS = {k: spec[0] for k, spec in SETTING_SPECS.items()}
+
+
+def clamp_setting(key: str, value) -> int:
+    """数值设置收敛到 SETTING_SPECS 区间；类型非法时抛 TypeError/ValueError。"""
+    _, lo, hi = SETTING_SPECS[key]
+    v = int(value)
+    if lo is not None:
+        v = max(lo, v)
+    if hi is not None:
+        v = min(hi, v)
+    return v
 
 # 会话状态机: new -> queued -> downloading -> merging -> done / failed / paused
 # "进行中"状态：进程重启后残留的这些状态恢复为 paused（分段保留、可续传）。
@@ -149,13 +166,24 @@ class Store:
     def save_settings(self, patch: dict) -> None:
         with self._lock:
             old_root = self.download_root()
+            old_dir = self.settings.get("download_dir")
             for k, v in patch.items():
                 if k in self.settings:
                     self.settings[k] = v
             self._normalize_download_dir()
-            self._save(SETTINGS_FILE, self.settings)
-            if self.download_root() != old_root:
-                self._rebase_session_files(old_root)
+            try:
+                self._save(SETTINGS_FILE, self.settings)
+                if self.download_root() != old_root:
+                    self._rebase_session_files(old_root)
+            except OSError:
+                # 回滚下载目录（内存与磁盘）：留着新目录的话，重试时旧==新会让
+                # rebase 被跳过，会话文件路径停在半迁移状态
+                self.settings["download_dir"] = old_dir
+                try:
+                    self._save(SETTINGS_FILE, self.settings)
+                except OSError:
+                    pass
+                raise
 
     def _rebase_session_files(self, old_root: Path) -> None:
         """下载目录改动后修正已完成场次的文件路径：库中相对路径按当前根目录解析，

@@ -53,6 +53,10 @@
     fmtSpeed(bps) {
       return bps ? util.fmtBytes(bps) + "/s" : "";
     },
+    /** 速度文案：有速度显示速度，无速度但在跑（合成中）则否则空闲 */
+    speedText(bps, running) {
+      return bps ? util.fmtBytes(bps) + "/s" : running ? "合成中" : "空闲";
+    },
     fmtCountdown(ts) {
       const remain = Math.max(0, Math.round(ts - Date.now() / 1000));
       const h = Math.floor(remain / 3600), m = Math.floor((remain % 3600) / 60), s = remain % 60;

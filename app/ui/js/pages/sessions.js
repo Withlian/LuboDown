@@ -3,8 +3,8 @@
 (function (Lubo) {
   "use strict";
 
-  const { $, $$, icon, fmtSpeed, fmtDayLabel, dayKey, fmtCountdown } = Lubo.util;
-  const { Motion, SessionCard, StateStore, Sparkline, Tabs } = Lubo;
+  const { $, $$, icon, fmtDayLabel, dayKey, fmtCountdown, speedText } = Lubo.util;
+  const { Motion, SessionCard, Sparkline, Status, Tabs } = Lubo;
   const DAYS = 14;
 
   class SessionsPage extends Lubo.Page {
@@ -62,14 +62,10 @@
 
     /* ---------- 主视觉卡与快捷卡 ---------- */
     _renderHero(sessions) {
-      const count = { new: 0, queued: 0, downloading: 0, merging: 0, done: 0, failed: 0, paused: 0 };
-      for (const s of sessions) if (s.status in count) count[s.status]++;
-      const active = count.queued + count.downloading + count.merging;
-      const pending = count.new + count.paused + count.failed;
       Motion.countTo($("#stat-total"), sessions.length);
-      Motion.countTo($("#stat-active"), active);
-      Motion.countTo($("#stat-done"), count.done);
-      Motion.countTo($("#stat-pending"), pending);
+      Motion.countTo($("#stat-active"), sessions.filter((s) => Status.ACTIVE.has(s.status)).length);
+      Motion.countTo($("#stat-done"), sessions.filter((s) => s.status === "done").length);
+      Motion.countTo($("#stat-pending"), sessions.filter((s) => Status.PENDING.has(s.status)).length);
 
       // 近 14 天每天开播场次
       const today = dayKey(Date.now() / 1000);
@@ -83,11 +79,10 @@
     }
 
     _renderQuick(sessions) {
-      const running = sessions.filter((s) => StateStore.RUNNING.has(s.status));
-      const speed = this.store.speed;
+      const running = sessions.filter((s) => Status.RUNNING.has(s.status));
       this.speedChart.draw(this.store.speeds);
+      $("#dl-speed").textContent = speedText(this.store.speed, running.length);
       const cur = running[0];
-      $("#dl-speed").textContent = speed ? fmtSpeed(speed) : running.length ? "合成中" : "空闲";
       $("#dl-title").textContent = cur ? `${cur.title || "未命名直播"} · ${+(cur.percent || 0).toFixed(1)}%` : "暂无进行中的任务";
     }
 
@@ -107,7 +102,7 @@
       const { status, uid, text, desc } = this.filter;
       const match = {
         all: () => true,
-        pending: (s) => StateStore.PENDING.has(s.status),   // 未下载：含暂停与失败
+        pending: (s) => Status.PENDING.has(s.status),   // 未下载：含暂停与失败
         done: (s) => s.status === "done",
       }[status];
       return sessions
@@ -165,11 +160,9 @@
       const session = this.store.sessions.find((x) => x.live_key === key);
       const act = btn.dataset.act;
       if (act === "start") {
-        const r = await Motion.busy(btn, () => this.api.call("start_download", key));
-        if (r && r.ok) { this.toast("已加入下载队列", "ok"); this.store.refresh(); }
-        else if (r) { this.toast("该场次已不存在，列表即将刷新", "err"); this.store.refresh(); }
+        await this.startDownload(btn, key);
       } else if (act === "goto") {
-        this.app.showDownloads(session ? SessionCard.downloadsTab(session) : null);
+        this.app.showDownloads(session ? Status.tab(session) : null);
       } else if (act === "remove") {
         this._remove(btn, key, session);
       }

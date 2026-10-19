@@ -2,13 +2,13 @@
 (function (Lubo) {
   "use strict";
 
-  const { $, esc, icon, fmtShort, fmtDur, fmtBytes, fmtSpeed } = Lubo.util;
-  const { Motion, SessionCard, StateStore, Sparkline, Tabs } = Lubo;
-  const ORDER = { downloading: 0, merging: 1, queued: 2 };   // 进行中列表：正在下载的排最前
+  const { $, esc, icon, fmtShort, fmtDur, fmtBytes, fmtSpeed, speedText } = Lubo.util;
+  const { Motion, SessionCard, Sparkline, Status, Tabs } = Lubo;
+  // 每个标签对应状态模型的一个 tab 维度，过滤天然对齐（见 core/status.js）
   const VIEWS = {
-    active: { match: (s) => StateStore.ACTIVE.has(s.status), empty: ["download", "暂无进行中的下载，可在回放列表中开始下载"] },
-    stopped: { match: (s) => s.status === "paused" || s.status === "failed", empty: ["pause", "没有已暂停或失败的任务"] },
-    done: { match: (s) => s.status === "done", empty: ["check", "还没有下载完成的回放"] },
+    active: { empty: ["download", "暂无进行中的下载，可在回放列表中开始下载"] },
+    stopped: { empty: ["pause", "没有已暂停或失败的任务"] },
+    done: { empty: ["check", "还没有下载完成的回放"] },
   };
   const ZERO_PROGRESS = { done_segs: 0, done_bytes: 0, total_bytes: 0, speed_bps: 0, percent: 0 };
 
@@ -35,18 +35,18 @@
       const sessions = state.sessions || [];
       this._renderHero(sessions);
       const view = VIEWS[this.tabs.value] || VIEWS.active;
-      const list = sessions.filter(view.match).sort((a, b) =>
-        (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || b.start_time - a.start_time);
+      const tab = this.tabs.value;
+      const list = sessions.filter((s) => Status.of(s).tab === tab).sort((a, b) =>
+        (Status.of(a).order ?? 9) - (Status.of(b).order ?? 9) || b.start_time - a.start_time);
       this._renderList(list, view.empty);
     }
 
     /* ---------- 速度主视觉卡 ---------- */
     _renderHero(sessions) {
-      const running = sessions.filter((s) => StateStore.RUNNING.has(s.status));
+      const running = sessions.filter((s) => Status.RUNNING.has(s.status));
       const queued = sessions.filter((s) => s.status === "queued").length;
-      const speed = this.store.speed;
       this.chart.draw(this.store.speeds);
-      $("#dlp-speed").textContent = speed ? fmtSpeed(speed) : running.length ? "合成中" : "空闲";
+      $("#dlp-speed").textContent = speedText(this.store.speed, running.length);
       const cur = running[0];
       $("#dlp-sub").textContent = cur
         ? `${running.length} 个任务进行中 · ${cur.title || "未命名直播"}`
@@ -89,9 +89,9 @@
     }
 
     static html(s) {
-      const [label, glyph] = SessionCard.STATUS[s.status] || [s.status, "video"];
+      const { label, glyph } = Status.of(s);
       const key = esc(s.live_key);
-      const cover = s.cover ? `<img src="${esc(s.cover)}" referrerpolicy="no-referrer" alt="" onerror="this.remove()">` : "";
+      const cover = SessionCard.cover(s);
       const { pct, tone } = SessionCard.progress(s);
       const extra = s.error
         ? ` · <span class="dl-err${s.status === "failed" ? "" : " soft"}" title="${esc(s.error)}">${esc(s.error)}</span>`
@@ -138,7 +138,7 @@
       const btn = (act, glyph, tip) =>
         `<button class="icon-btn go" data-act="${act}" data-key="${key}" title="${tip}">${icon(glyph)}</button>`;
       if (s.status === "done") return btn("open", "folder-open", "在文件夹中显示");
-      if (StateStore.ACTIVE.has(s.status)) return btn("pause", "pause", "暂停");
+      if (Status.ACTIVE.has(s.status)) return btn("pause", "pause", "暂停");
       if (s.status === "failed") return btn("start", "retry", "重试");
       return btn("start", "play", "继续");
     }
@@ -150,9 +150,7 @@
       const session = this.store.sessions.find((x) => x.live_key === key);
       const act = btn.dataset.act;
       if (act === "start") {
-        const r = await Motion.busy(btn, () => this.api.call("start_download", key));
-        if (r && r.ok) { this.toast("已加入下载队列", "ok"); this.store.refresh(); }
-        else if (r) { this.toast("该场次已不存在，列表即将刷新", "err"); this.store.refresh(); }
+        await this.startDownload(btn, key);
       } else if (act === "pause") {
         await Motion.busy(btn, () => this.api.call("pause_download", key));
         this.toast("暂停请求已发送");

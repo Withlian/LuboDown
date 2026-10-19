@@ -1,29 +1,24 @@
 /* 场次卡片（回放列表）：只展示场次信息与状态，下载过程（进度、暂停、重试）统一在下载页管理。
-   状态表与进度计算由下载页共用。 */
+   状态定义见 core/status.js；进度计算由下载页共用。 */
 (function (Lubo) {
   "use strict";
 
   const { esc, icon, fmtShort, fmtDur, DAY } = Lubo.util;
-  const ACTIVE = Lubo.StateStore.ACTIVE;
+  const { Status } = Lubo;
   const KEEP_DAYS = 14;   // B 站回放保留时长
 
-  const STATUS = {
-    new: ["未下载", "video"], queued: ["排队中", "clock"], downloading: ["下载中", "download"],
-    merging: ["合成中", "zap"], done: ["已完成", "check"], failed: ["失败", "alert"], paused: ["已暂停", "pause"],
-  };
-
   class SessionCard {
-    static STATUS = STATUS;   // 状态 -> [文案, 图标]
+    /** 封面图（回放列表卡片与下载页行共用；加载失败自行移除） */
+    static cover(s) {
+      return s.cover ? `<img src="${esc(s.cover)}" referrerpolicy="no-referrer" alt="" onerror="this.remove()">` : "";
+    }
 
     static html(s, confirming = false) {
-      const [label, glyph] = STATUS[s.status] || [s.status, "video"];
+      const { label, glyph } = Status.of(s);
       const key = esc(s.live_key);
-      const cover = s.cover
-        ? `<img src="${esc(s.cover)}" referrerpolicy="no-referrer" alt="" onerror="this.remove()">`
-        : "";
       const dur = s.duration || (s.end_time > s.start_time ? s.end_time - s.start_time : 0);
       return `<article class="sc${s.status === "downloading" ? " is-active" : ""}">
-        <div class="sc-badge">${icon(glyph)}${cover}</div>
+        <div class="sc-badge">${icon(glyph)}${SessionCard.cover(s)}</div>
         <span class="chip ${esc(s.status)}">${esc(label)}</span>
         <div class="sc-actions">${SessionCard.actions(s, key, confirming)}</div>
         <h4 class="sc-title" title="${esc(s.title)}">${esc(s.title || "未命名直播")}</h4>
@@ -36,16 +31,8 @@
     static progress(s) {
       if (s.status === "done") return { pct: 100, tone: "done" };
       const pct = +Math.min(100, s.percent || 0).toFixed(1);
-      const tone = s.status === "merging" ? "merging live" : ACTIVE.has(s.status) ? "live" : "";
+      const tone = s.status === "merging" ? "merging live" : Status.ACTIVE.has(s.status) ? "live" : "";
       return { pct, tone };
-    }
-
-    /** 状态对应的下载页标签；未下载的场次没有下载任务 */
-    static downloadsTab(s) {
-      if (s.status === "done") return "done";
-      if (ACTIVE.has(s.status)) return "active";
-      if (s.status === "paused" || s.status === "failed") return "stopped";
-      return null;
     }
 
     static expiry(s) {
@@ -59,7 +46,7 @@
       const btn = (act, glyph, tip, cls = "go") =>
         `<button class="icon-btn ${cls}" data-act="${act}" data-key="${key}" title="${tip}">${icon(glyph)}</button>`;
       // 未下载的场次在这里开始下载；已有下载任务的跳到下载页对应标签查看
-      const main = SessionCard.downloadsTab(s) ? btn("goto", "arrow-right", "在下载页查看") : btn("start", "download", "下载");
+      const main = Status.tab(s) ? btn("goto", "arrow-right", "在下载页查看") : btn("start", "download", "下载");
       // 已完成的场次确认后会连视频文件一起删，提示必须点明
       const del = confirming
         ? `<button class="icon-btn del confirming" data-act="remove" data-key="${key}" title="${s.status === "done" ? "将同时删除视频文件" : "再次点击确认"}">${icon("trash")}确认</button>`

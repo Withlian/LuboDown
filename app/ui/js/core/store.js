@@ -3,16 +3,9 @@
 (function (Lubo) {
   "use strict";
 
-  const ACTIVE = new Set(["queued", "downloading", "merging"]);
-  const PENDING = new Set(["new", "paused", "failed"]);
-  const RUNNING = new Set(["downloading", "merging"]);
   const SPEED_SAMPLES = 30;
 
   class StateStore extends EventTarget {
-    static ACTIVE = ACTIVE;
-    static PENDING = PENDING;
-    static RUNNING = RUNNING;
-
     constructor(api, interval = 1500) {
       super();
       this.api = api;
@@ -29,7 +22,7 @@
       const s = await this.api.call("get_state");
       if (!s) return;
       this.state = s;
-      this.speeds.push((s.sessions || []).reduce((sum, x) => sum + (RUNNING.has(x.status) ? x.speed_bps || 0 : 0), 0));
+      this.speeds.push((s.sessions || []).reduce((sum, x) => sum + (Lubo.Status.RUNNING.has(x.status) ? x.speed_bps || 0 : 0), 0));
       this.speeds.shift();
       this.dispatchEvent(new CustomEvent("change", { detail: s }));
     }

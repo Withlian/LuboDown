@@ -26,6 +26,15 @@
 
     toast(message, type) { this.app.toaster.show(message, type); }
 
+    /** 开始下载的共用流程（回放列表与下载页）：提示结果并刷新状态 */
+    async startDownload(btn, key) {
+      const r = await Lubo.Motion.busy(btn, () => this.api.call("start_download", key));
+      if (!r) return;   // 按钮已在加载中
+      if (r.ok) this.toast("已加入下载队列", "ok");
+      else this.toast("该场次已不存在，列表即将刷新", "err");
+      this.store.refresh();
+    }
+
     /** 为一组控件绑定事件的小助手：{ "#id": ["click", handler] } */
     bind(map) {
       for (const [sel, [type, handler]] of Object.entries(map)) {

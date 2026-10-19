@@ -2,7 +2,7 @@
 (function (Lubo) {
   "use strict";
 
-  const KEY = "lubo-sidebar";
+  const KEY = "lubo-sidebar";   // 与 index.html 头部内联脚本一致
 
   class Sidebar extends EventTarget {
     constructor(root) {

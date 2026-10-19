@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LuboDown · B站直播回放下载</title>
 <script>
-  /* 首帧前确定主题与侧边栏状态，避免闪烁：本地偏好 > 系统设置 */
+  /* 首帧前确定主题与侧边栏状态，避免闪烁：本地偏好 > 系统设置。
+     键名 lubo-theme / lubo-sidebar 与 theme.js / sidebar.js 保持一致（内联须先于脚本执行，无法引用） */
   (function () {
     var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
     var t = get("lubo-theme");
@@ -399,6 +400,7 @@
 <script src="js/core/util.js"></script>
 <script src="js/core/motion.js"></script>
 <script src="js/core/api.js"></script>
+<script src="js/core/status.js"></script>
 <script src="js/core/store.js"></script>
 <script src="js/components/toaster.js"></script>
 <script src="js/components/theme.js"></script>

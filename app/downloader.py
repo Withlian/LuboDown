@@ -131,7 +131,8 @@ class _KeepAlive:
 
     def get(self, path: str, headers: dict | None = None):
         """返回 (HTTP 状态码, 响应头, 响应体)。4xx/5xx 不复用连接。"""
-        for attempt in (1, 2):
+        last: Exception | None = None
+        for _attempt in (1, 2):
             try:
                 conn = self._ensure()
                 conn.request("GET", path, headers={"User-Agent": UA,
@@ -141,11 +142,11 @@ class _KeepAlive:
                 if resp.status >= 400:     # CDN 错误不复用连接
                     self._conn = None
                 return resp.status, resp.headers, body
-            except (OSError, http.client.HTTPException):
+            except (OSError, http.client.HTTPException) as e:
                 # 连接作废；固定 IP 失效的自愈在 _PinnedConnection.connect 里完成
                 self._conn = None
-                if attempt == 2:
-                    raise
+                last = e
+        raise last
 
     def close(self):
         if self._conn is not None:
@@ -265,6 +266,11 @@ class DownloadManager:
     def _mark_paused(self, job: Job) -> None:
         self._settle(job, "paused", "已暂停（可继续）")
 
+    def _fail(self, job: Job, msg: str) -> None:
+        """失败收口：落状态并写日志，调用方随后返回。"""
+        self._settle(job, "failed", msg)
+        self.store.log(job.error, "error")
+
     def _run_loop(self):
         while True:
             live_key, job = self._queue.get()
@@ -312,13 +318,11 @@ class DownloadManager:
         s = self.store.settings
         # —— 前置检查 ——
         if not s.get("sessdata"):
-            self._settle(job, "failed", "未配置 SESSDATA，请先在设置中填写")
-            self.store.log(job.error, "error")
+            self._fail(job, "未配置 SESSDATA，请先在设置中填写")
             return
         ffmpeg = resolve_ffmpeg(s)
         if ffmpeg is None:
-            self._settle(job, "failed", "找不到 ffmpeg（已内置于项目 bin/ffmpeg.exe，或请在设置中指定路径）")
-            self.store.log(job.error, "error")
+            self._fail(job, "找不到 ffmpeg（已内置于项目 bin/ffmpeg.exe，或请在设置中指定路径）")
             return
         anchor_dir, final, parts_dir = self._session_dir(job)
         root = self.store.download_root()
@@ -334,10 +338,8 @@ class DownloadManager:
             owner = next((k for k, r in self.store.snapshot_sessions().items()
                           if k != job.live_key and r.get("file") == final_rel), None)
             if owner:
-                msg = (f"{final.name} 已被场次 {owner} 记录，疑似同日序号重排冲突，"
-                       "可在设置中开启文件名附加主播名与开播时间，或删除冲突文件后重试")
-                self._settle(job, "failed", msg)
-                self.store.log(msg, "error")
+                self._fail(job, f"{final.name} 已被场次 {owner} 记录，疑似同日序号重排冲突，"
+                                "可在设置中开启文件名附加主播名与开播时间，或删除冲突文件后重试")
                 return
             if not s.get("keep_parts"):
                 self._cleanup_parts(parts_dir)   # 之前中断留下的分段一并清掉
@@ -361,8 +363,7 @@ class DownloadManager:
         try:
             pairs = self._fetch_playlist(job)
         except ApiError as e:
-            self._settle(job, "failed", f"获取播放列表失败：{e.message}")
-            self.store.log(job.error, "error")
+            self._fail(job, f"获取播放列表失败：{e.message}")
             return
 
         job.total_segs = len(pairs)
@@ -392,8 +393,7 @@ class DownloadManager:
 
         remaining = self._missing_segments(pairs, parts_dir)
         if remaining:
-            self._settle(job, "failed", f"{len(remaining)} 个分段多次重试后仍失败")
-            self.store.log(job.error, "error")
+            self._fail(job, f"{len(remaining)} 个分段多次重试后仍失败")
             return
 
         # —— 合成 ——
@@ -406,8 +406,7 @@ class DownloadManager:
             if job.stop_event.is_set():   # 合成阶段被暂停：分段保留，续跑时重新合成
                 self._mark_paused(job)
                 return
-            self._settle(job, "failed", f"合成失败：{msg}")
-            self.store.log(job.error, "error")
+            self._fail(job, f"合成失败：{msg}")
             return
         if not s.get("keep_parts"):
             self._cleanup_parts(parts_dir)
