@@ -12,13 +12,17 @@
     done:        { label: "已完成", glyph: "check",    tab: "done" },
     failed:      { label: "失败",   glyph: "alert",    tab: "stopped" },
     paused:      { label: "已暂停", glyph: "pause",    tab: "stopped" },
+    // 以下两个只存在于视图：missing 由后端 get_state 判定（已完成但成品已不在磁盘上，不落库），
+    // deleted 是「最近删除」里的场次（state.deleted），只能恢复
+    missing:     { label: "文件缺失", glyph: "alert" },
+    deleted:     { label: "已删除", glyph: "trash" },
   };
 
   const Status = {
     TABLE,
     ACTIVE: new Set(["queued", "downloading", "merging"]),   // 有任务进行中（对应后端 ACTIVE_STATES）
     RUNNING: new Set(["downloading", "merging"]),            // 正在产出速度的阶段
-    PENDING: new Set(["new", "paused", "failed"]),           // 「未下载」标签：含暂停与失败
+    PENDING: new Set(["new", "paused", "failed", "missing"]),   // 「未下载」标签：含暂停、失败与文件缺失
 
     /** 状态定义；未知状态兜底为原样文案 + video 图标 */
     of(s) {

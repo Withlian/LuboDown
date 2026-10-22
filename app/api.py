@@ -37,19 +37,31 @@ class Api:
                     "status", "error", "total_segs", "done_segs", "done_bytes",
                     "total_bytes", "speed_bps", "percent")})
                 view["file"] = jv["file"]
-            view["file_size"] = 0        # 下载页展示成品大小；文件被移走则为 0
+            view["file_size"] = 0        # 下载页展示成品大小
             if view["status"] == "done" and view["file"]:
                 try:
                     view["file_size"] = os.path.getsize(view["file"])
+                except FileNotFoundError:
+                    # 成品已在程序外被删除/移走：呈现为「文件缺失」，可在回放列表重新下载。
+                    # 只改视图不落库——移动硬盘暂未接入等情况，文件回来后自动恢复为已完成；
+                    # 库里仍是 done，定时检查的自动下载也不会把它当新场次重下
+                    view["status"] = "missing"
+                    view["error"] = "成品文件已不存在，可重新下载"
                 except OSError:
                     pass
             sessions.append(view)
+        deleted = [{**{k: rec.get(k) for k in (
+            "live_key", "uid", "name", "title", "cover", "start_time", "end_time",
+            "duration", "deleted_at")}, "status": "deleted"}
+            for rec in self._store.deleted_sessions()]
         return {
             "settings": self._store.masked_settings(),
             "sessions": sessions,
+            "deleted": deleted,
             "scheduler": {
                 "checking": self._scheduler.checking,
-                "next_run_ts": int(self._scheduler.next_run),
+                # 定时检查关闭时不下发下次时间，界面据此显示"未启用"而不是继续倒计时
+                "next_run_ts": int(self._scheduler.next_run) if self._store.settings.get("auto_check") else 0,
             },
             "ffmpeg_ok": resolve_ffmpeg(self._store.settings) is not None,
             "logs": self._store.recent_logs(150),
@@ -77,7 +89,10 @@ class Api:
                 v = str(patch[key] or "").strip()
                 if v:
                     clean[key] = v
+        old = {k: self._store.settings.get(k) for k in ("auto_check", "check_interval_min")}
         self._store.save_settings(clean)
+        if any(self._store.settings.get(k) != v for k, v in old.items()):
+            self._scheduler.reschedule()   # 不重排的话倒计时沿用关闭前的旧时间点 / 旧间隔
         self._store.log("设置已保存"
                        + ("（含新凭证）" if ("sessdata" in clean or "bili_jct" in clean) else ""))
         return {"ok": True}
@@ -213,6 +228,14 @@ class Api:
         # 覆盖成旧状态，分段残留会让重建后的下载"未下先续"
         self._manager.discard(live_key)
         self._manager.purge_parts(live_key)
+        return {"ok": True}
+
+    def restore_session(self, live_key: str) -> dict:
+        """从「最近删除」恢复场次：重新入库为未下载，可再次下载。"""
+        rec = self._store.restore_session(str(live_key))
+        if rec is None:
+            return {"ok": False, "message": "该场次的删除记录已不存在"}
+        self._store.log(f"已恢复场次：{rec.get('name') or rec.get('uid')} {rec.get('title') or ''}".rstrip())
         return {"ok": True}
 
     # ============ 文件 ============

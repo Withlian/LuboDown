@@ -19,7 +19,7 @@
       const dur = s.duration || (s.end_time > s.start_time ? s.end_time - s.start_time : 0);
       return `<article class="sc${s.status === "downloading" ? " is-active" : ""}">
         <div class="sc-badge">${icon(glyph)}${SessionCard.cover(s)}</div>
-        <span class="chip ${esc(s.status)}">${esc(label)}</span>
+        <span class="chip ${esc(s.status)}"${s.error ? ` title="${esc(s.error)}"` : ""}>${esc(label)}</span>
         <div class="sc-actions">${SessionCard.actions(s, key, confirming)}</div>
         <h4 class="sc-title" title="${esc(s.title)}">${esc(s.title || "未命名直播")}</h4>
         <p class="sc-sub"><b>${esc(s.name || s.uid)}</b> · ${fmtShort(s.start_time)}</p>
@@ -45,8 +45,10 @@
     static actions(s, key, confirming) {
       const btn = (act, glyph, tip, cls = "go") =>
         `<button class="icon-btn ${cls}" data-act="${act}" data-key="${key}" title="${tip}">${icon(glyph)}</button>`;
+      if (s.status === "deleted") return btn("restore", "retry", "恢复到回放列表");
       // 未下载的场次在这里开始下载；已有下载任务的跳到下载页对应标签查看
-      const main = Status.tab(s) ? btn("goto", "arrow-right", "在下载页查看") : btn("start", "download", "下载");
+      const main = Status.tab(s) ? btn("goto", "arrow-right", "在下载页查看")
+        : btn("start", "download", s.status === "missing" ? "重新下载" : "下载");
       // 已完成的场次确认后会连视频文件一起删，提示必须点明
       const del = confirming
         ? `<button class="icon-btn del confirming" data-act="remove" data-key="${key}" title="${s.status === "done" ? "将同时删除视频文件" : "再次点击确认"}">${icon("trash")}确认</button>`

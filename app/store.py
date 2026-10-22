@@ -57,7 +57,18 @@ def clamp_setting(key: str, value) -> int:
         v = min(hi, v)
     return v
 
+
+def _deleted_at(entry) -> float | None:
+    """删除记录的时间戳。新格式为 {"t": 时间戳, "rec": 场次快照}，旧版本只存时间戳。"""
+    if isinstance(entry, dict):
+        entry = entry.get("t")
+    if isinstance(entry, bool) or not isinstance(entry, (int, float)):
+        return None
+    return entry
+
 # 会话状态机: new -> queued -> downloading -> merging -> done / failed / paused
+# （另有两个只存在于界面视图的状态：missing=已完成但成品已不在磁盘上，由 api.get_state 判定、不落库；
+#  deleted=「最近删除」里可恢复的场次，来自 deleted.json）
 # "进行中"状态：进程重启后残留的这些状态恢复为 paused（分段保留、可续传）。
 # 状态判断统一引用此集合，新增状态时只改这里。
 ACTIVE_STATES = frozenset({"queued", "downloading", "merging"})
@@ -80,7 +91,8 @@ class Store:
             self._save(SETTINGS_FILE, self.settings)
         self.sessions: dict[str, dict] = self._load(SESSIONS_FILE, {})
         self._normalize_session_files()
-        self.deleted: dict[str, int] = self._load(DELETED_FILE, {})   # live_key -> 删除时间戳
+        # live_key -> {"t": 删除时间戳, "rec": 删除时的场次快照（供恢复）}；旧版本的值是裸时间戳
+        self.deleted: dict[str, dict | int] = self._load(DELETED_FILE, {})
         if self._prune_deleted():
             self._save(DELETED_FILE, self.deleted)
         self._logs: list[dict] = []
@@ -156,8 +168,8 @@ class Store:
     def _prune_deleted(self) -> bool:
         """清掉过期的删除记录，返回是否有变化。"""
         cutoff = time.time() - DELETED_KEEP_SEC
-        expired = [k for k, t in self.deleted.items()
-                   if not isinstance(t, (int, float)) or t < cutoff]
+        expired = [k for k, v in self.deleted.items()
+                   if (t := _deleted_at(v)) is None or t < cutoff]
         for k in expired:
             del self.deleted[k]
         return bool(expired)
@@ -226,6 +238,7 @@ class Store:
     def upsert_sessions(self, items: list[dict]) -> int:
         """按 live_key 合并场次信息，返回新增数量（live_key 形态校验见 VALID_KEY_RE）。"""
         added = 0
+        tombs_changed = False
         with self._lock:
             for it in items:
                 key = str(it.get("live_key") or "")
@@ -234,6 +247,11 @@ class Store:
                         self.log(f"忽略异常 live_key 的场次：{key[:24]}")
                     continue
                 if key in self.deleted:   # 用户删过的场次不再重新入库（否则会被自动下载再下一遍）
+                    tomb = self.deleted[key]
+                    if not (isinstance(tomb, dict) and isinstance(tomb.get("rec"), dict)):
+                        # 旧版本的删除记录只有时间戳：补上场次快照，「最近删除」才能列出并恢复
+                        self.deleted[key] = {"t": _deleted_at(tomb) or int(time.time()), "rec": it}
+                        tombs_changed = True
                     continue
                 if key not in self.sessions:
                     it.setdefault("status", "new")
@@ -243,6 +261,8 @@ class Store:
                     self.sessions[key].update(
                         {k: v for k, v in it.items() if k != "status"})
             self._save(SESSIONS_FILE, self.sessions)
+            if tombs_changed:
+                self._save(DELETED_FILE, self.deleted)
         return added
 
     def update_session(self, live_key: str, **fields) -> None:
@@ -253,11 +273,44 @@ class Store:
 
     def remove_session(self, live_key: str) -> None:
         with self._lock:
-            self.sessions.pop(live_key, None)
+            rec = self.sessions.pop(live_key, None)
+            old = self.deleted.get(live_key)
+            if rec is None and isinstance(old, dict):   # 重复删除：保留已有快照，不让"可恢复"丢失
+                rec = old.get("rec")
             self._save(SESSIONS_FILE, self.sessions)
-            self.deleted[live_key] = int(time.time())
+            entry: dict = {"t": int(time.time())}
+            if rec:
+                entry["rec"] = rec
+            self.deleted[live_key] = entry
             self._prune_deleted()
             self._save(DELETED_FILE, self.deleted)
+
+    def deleted_sessions(self) -> list[dict]:
+        """「最近删除」：带场次快照、可恢复的删除记录（新的在前），附 deleted_at。"""
+        with self._lock:
+            out = [dict(v["rec"], live_key=k, deleted_at=int(_deleted_at(v) or 0))
+                   for k, v in self.deleted.items()
+                   if isinstance(v, dict) and isinstance(v.get("rec"), dict)
+                   and k not in self.sessions]
+        return sorted(out, key=lambda s: -int(s.get("start_time") or 0))
+
+    def restore_session(self, live_key: str) -> dict | None:
+        """撤销删除：按未下载的场次重新入库，返回恢复后的记录；没有可恢复的快照时返回 None。
+        删除时成品与分段已清理，状态一律回到 new、下载从头开始
+        （磁盘上若仍留有成品，下载流程会识别并直接标记完成）。"""
+        with self._lock:
+            tomb = self.deleted.get(live_key)
+            rec = tomb.get("rec") if isinstance(tomb, dict) else None
+            if not isinstance(rec, dict):
+                return None
+            if live_key not in self.sessions:
+                self.sessions[live_key] = {
+                    **{k: v for k, v in rec.items() if k not in ("status", "error", "file")},
+                    "live_key": live_key, "status": "new"}
+                self._save(SESSIONS_FILE, self.sessions)
+            del self.deleted[live_key]
+            self._save(DELETED_FILE, self.deleted)
+            return self.sessions[live_key]
 
     def all_sessions(self) -> list[dict]:
         with self._lock:

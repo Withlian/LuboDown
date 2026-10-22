@@ -44,7 +44,8 @@
     tick() {
       const sch = this.store.state.scheduler || {};
       $("#next-run").textContent = sch.checking ? "检查中…"
-        : sch.next_run_ts ? `${fmtTime(sch.next_run_ts)}（${fmtCountdown(sch.next_run_ts)}后）` : "—";
+        : sch.next_run_ts ? `${fmtTime(sch.next_run_ts)}（${fmtCountdown(sch.next_run_ts)}后）`
+        : this.store.settings.auto_check ? "—" : "定时检查未启用";
     }
 
     _renderLogs(logs) {

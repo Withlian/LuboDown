@@ -176,7 +176,7 @@ select option { background: var(--surface); color: var(--fg); }
 .chip.queued, .chip.downloading { background: var(--info-bg); color: var(--info-fg); }
 .chip.merging, .chip.paused { background: var(--warn-bg); color: var(--warn-fg); }
 .chip.done { background: var(--ok-bg); color: var(--ok-fg); }
-.chip.failed { background: var(--err-bg); color: var(--err-fg); }
+.chip.failed, .chip.missing { background: var(--err-bg); color: var(--err-fg); }
 .chip.downloading::before, .chip.merging::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
   animation: pulse 1.4s ease-in-out infinite;

@@ -51,6 +51,7 @@ class Scheduler:
         self.manager = manager
         self.checking = False
         self.next_run = 0.0
+        self.last_run = 0.0   # 上一轮定时/立即检查结束的时间，开关或间隔变更时据此重排
         self._lock = threading.Lock()
         threading.Thread(target=self._tick_loop, daemon=True).start()
 
@@ -61,6 +62,17 @@ class Scheduler:
             return False
         threading.Thread(target=self._check, daemon=True).start()
         return True
+
+    def reschedule(self) -> None:
+        """定时开关或间隔变更后重排下次检查：上次检查结束 + 当前间隔；
+        已过点（如关闭很久后重新开启）则与启动时一样 10 秒后检查。"""
+        self.next_run = max(self.last_run + self._interval_sec(), time.time() + 10)
+
+    def _interval_sec(self) -> float:
+        try:
+            return float(self.store.settings.get("check_interval_min", 60)) * 60
+        except (TypeError, ValueError):
+            return 3600.0   # 配置被手工改坏时不让 next_run 失去推进
 
     def run_check(self, auto_download: bool = False) -> tuple[int, int] | None:
         """拉取全部主播的回放列表并入库，返回 (总场数, 新增场数)。
@@ -145,8 +157,5 @@ class Scheduler:
                 if added:
                     self.store.log(f"检查完成，新增 {added} 场")
         finally:
-            try:
-                interval = float(self.store.settings.get("check_interval_min", 60))
-            except (TypeError, ValueError):
-                interval = 60.0   # 配置被手工改坏时不让 next_run 失去推进
-            self.next_run = time.time() + interval * 60
+            self.last_run = time.time()
+            self.next_run = self.last_run + self._interval_sec()

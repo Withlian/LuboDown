@@ -39,7 +39,8 @@
       const sessions = state.sessions || [];
       this._renderHero(sessions);
       this._renderQuick(sessions);
-      this._renderGrid(this._view(sessions));
+      // 「最近删除」列的是删除记录（state.deleted），不计入统计，只能恢复
+      this._renderGrid(this._view(this.filter.status === "deleted" ? state.deleted || [] : sessions));
     }
 
     tick() {
@@ -102,8 +103,9 @@
       const { status, uid, text, desc } = this.filter;
       const match = {
         all: () => true,
-        pending: (s) => Status.PENDING.has(s.status),   // 未下载：含暂停与失败
+        pending: (s) => Status.PENDING.has(s.status),   // 未下载：含暂停、失败与文件缺失
         done: (s) => s.status === "done",
+        deleted: () => true,
       }[status];
       return sessions
         .filter((s) => match(s)
@@ -115,11 +117,14 @@
     _renderGrid(list) {
       $("#list-count").textContent = list.length;
       if (!list.length) {
-        if (this.gridSig !== "empty") {
-          const filtered = this.store.sessions.length > 0;
-          this.grid.innerHTML = `<div class="empty"><div class="empty-ico">${icon(filtered ? "search" : "inbox")}</div>
-            <div>${filtered ? "没有符合条件的场次" : "暂无回放数据，点击检查新回放拉取"}</div></div>`;
-          this.gridSig = "empty";
+        const deletedTab = this.filter.status === "deleted";
+        // 有数据但被筛选/搜索滤空时提示"没有符合条件"，而不是误报没有数据
+        const filtered = (deletedTab ? this.store.state.deleted || [] : this.store.sessions).length > 0;
+        const [glyph, text] = filtered ? ["search", "没有符合条件的场次"]
+          : deletedTab ? ["trash", "30 天内没有删除过的场次"] : ["inbox", "暂无回放数据，点击检查新回放拉取"];
+        if (this.gridSig !== "empty:" + text) {
+          this.grid.innerHTML = `<div class="empty"><div class="empty-ico">${icon(glyph)}</div><div>${text}</div></div>`;
+          this.gridSig = "empty:" + text;
           this.cards.clear();
         }
         return;
@@ -165,6 +170,20 @@
         this.app.showDownloads(session ? Status.tab(session) : null);
       } else if (act === "remove") {
         this._remove(btn, key, session);
+      } else if (act === "restore") {
+        this._restore(btn, key);
+      }
+    }
+
+    async _restore(btn, key) {
+      const r = await Motion.busy(btn, () => this.api.call("restore_session", key));
+      if (r && r.ok) {
+        const slot = btn.closest(".slot");
+        if (slot) await Motion.collapse(slot);
+        this.toast("已恢复到回放列表，可重新下载", "ok");
+        this.store.refresh();
+      } else if (r) {
+        this.toast(r.message || "恢复失败", "err");
       }
     }
 
@@ -182,7 +201,7 @@
       if (r && r.ok) {
         const slot = btn.closest(".slot");
         if (slot) await Motion.collapse(slot);
-        this.toast("已删除", "ok");
+        this.toast("已删除，可在「最近删除」中恢复", "ok");
         this.store.refresh();
       } else if (r) {
         this.toast(r.message || "删除失败", "err");
