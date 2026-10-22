@@ -36,6 +36,7 @@ SETTING_SPECS = {
     "auto_check": (True, None, None),       # 定时检查开关
     "auto_download": (False, None, None),   # 检查到新场次是否自动下载
     "auto_download_since": (0, 0, None),    # 仅自动下载该时间戳之后开播的场次（0=不限）
+    "revive_deleted": (True, None, None),   # 刷新/检查时让删除过的场次重新入库（回到未下载、不自动下载）
     "concurrency": (6, 1, 16),              # 分段下载并发数
     "keep_parts": (False, None, None),      # 合成后是否保留分段文件
     "name_with_anchor": (False, None, None),  # 文件名附加主播名与开播时间
@@ -235,18 +236,28 @@ class Store:
             return s
 
     # ---------- sessions ----------
-    def upsert_sessions(self, items: list[dict]) -> int:
-        """按 live_key 合并场次信息，返回新增数量（live_key 形态校验见 VALID_KEY_RE）。"""
-        added = 0
+    def upsert_sessions(self, items: list[dict]) -> tuple[int, int]:
+        """按 live_key 合并场次信息，返回 (新增数量, 恢复的已删除场次数量)
+        （live_key 形态校验见 VALID_KEY_RE）。"""
+        added = revived = 0
         tombs_changed = False
         with self._lock:
+            revive = bool(self.settings.get("revive_deleted"))
             for it in items:
                 key = str(it.get("live_key") or "")
                 if not VALID_KEY_RE.fullmatch(key):
                     if key:
                         self.log(f"忽略异常 live_key 的场次：{key[:24]}")
                     continue
-                if key in self.deleted:   # 用户删过的场次不再重新入库（否则会被自动下载再下一遍）
+                if key in self.deleted and revive and key not in self.sessions:
+                    # 删过的场次随刷新回到列表、状态为未下载；打上 no_auto 标记，
+                    # 定时检查的自动下载不会把它当新场次再下一遍，需要时手动下载
+                    del self.deleted[key]
+                    tombs_changed = True
+                    self.sessions[key] = {**it, "status": "new", "no_auto": True}
+                    revived += 1
+                    continue
+                if key in self.deleted:   # 关闭恢复时，删过的场次不再重新入库（否则会被自动下载再下一遍）
                     tomb = self.deleted[key]
                     if not (isinstance(tomb, dict) and isinstance(tomb.get("rec"), dict)):
                         # 旧版本的删除记录只有时间戳：补上场次快照，「最近删除」才能列出并恢复
@@ -263,7 +274,7 @@ class Store:
             self._save(SESSIONS_FILE, self.sessions)
             if tombs_changed:
                 self._save(DELETED_FILE, self.deleted)
-        return added
+        return added, revived
 
     def update_session(self, live_key: str, **fields) -> None:
         with self._lock:
@@ -297,7 +308,7 @@ class Store:
     def restore_session(self, live_key: str) -> dict | None:
         """撤销删除：按未下载的场次重新入库，返回恢复后的记录；没有可恢复的快照时返回 None。
         删除时成品与分段已清理，状态一律回到 new、下载从头开始
-        （磁盘上若仍留有成品，下载流程会识别并直接标记完成）。"""
+        （磁盘上若仍留有成品，下载流程会识别并直接标记完成）；与刷新时的自动恢复一样不参与自动下载。"""
         with self._lock:
             tomb = self.deleted.get(live_key)
             rec = tomb.get("rec") if isinstance(tomb, dict) else None
@@ -306,7 +317,7 @@ class Store:
             if live_key not in self.sessions:
                 self.sessions[live_key] = {
                     **{k: v for k, v in rec.items() if k not in ("status", "error", "file")},
-                    "live_key": live_key, "status": "new"}
+                    "live_key": live_key, "status": "new", "no_auto": True}
                 self._save(SESSIONS_FILE, self.sessions)
             del self.deleted[live_key]
             self._save(DELETED_FILE, self.deleted)

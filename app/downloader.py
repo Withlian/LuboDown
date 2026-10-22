@@ -295,8 +295,11 @@ class DownloadManager:
         开启 name_with_anchor 后追加主播名与开播时间：2026.9.25-01_主播名_19-59。"""
         d = datetime.fromtimestamp(job.start_time, TZ8).date()
         prefix = f"{d.year}.{d.month}.{d.day}"
+        # 删除记录里可恢复的场次也占序号：删除期间下载的同日场次若顶替了它的序号，
+        # 它刷新回归 / 手动恢复后再下载会撞上对方的成品
+        candidates = list(self.store.snapshot_sessions().values()) + self.store.deleted_sessions()
         same_day = sorted(
-            (s for s in self.store.snapshot_sessions().values()
+            (s for s in candidates
              if s.get("uid") == job.uid and s.get("start_time")
              and datetime.fromtimestamp(int(s["start_time"]), TZ8).date() == d),
             key=lambda s: int(s["start_time"]))

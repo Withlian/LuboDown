@@ -74,8 +74,8 @@ class Scheduler:
         except (TypeError, ValueError):
             return 3600.0   # 配置被手工改坏时不让 next_run 失去推进
 
-    def run_check(self, auto_download: bool = False) -> tuple[int, int] | None:
-        """拉取全部主播的回放列表并入库，返回 (总场数, 新增场数)。
+    def run_check(self, auto_download: bool = False) -> tuple[int, int, int] | None:
+        """拉取全部主播的回放列表并入库，返回 (总场数, 新增场数, 恢复的已删除场数)。
 
         手动刷新与定时检查共用的唯一入口；同一时刻只允许一轮检查，
         已有检查在进行时立即返回 None。auto_download=True 时对
@@ -87,7 +87,7 @@ class Scheduler:
             self.checking = True
         self.store.log("开始检查回放列表…")
         try:
-            total = added = fetched = 0
+            total = added = revived_all = fetched = 0
             last_err: Exception | None = None
             for anchor in self.store.settings.get("anchors", []):
                 try:
@@ -104,24 +104,26 @@ class Scheduler:
                 fetched += 1
                 records = [_to_record(uid, name, it) for it in items if it.get("live_key")]
                 total += len(records)
-                new_added = self.store.upsert_sessions(records)
+                new_added, revived = self.store.upsert_sessions(records)
                 added += new_added
-                self.store.log(f"{name}：共 {len(records)} 场，新增 {new_added} 场")
+                revived_all += revived
+                self.store.log(f"{name}：共 {len(records)} 场，新增 {new_added} 场"
+                               + (f"，恢复已删除 {revived} 场" if revived else ""))
                 if auto_download:
                     self._auto_download(records)
             if fetched == 0 and last_err is not None:
                 raise last_err
-            return total, added
+            return total, added, revived_all
         finally:
             self.checking = False
 
     def _auto_download(self, records: list[dict]) -> None:
-        """对状态仍为 new 且切片已就绪的场次启动下载。"""
+        """对状态仍为 new 且切片已就绪的场次启动下载（删除后恢复的场次带 no_auto，只手动下载）。"""
         since = int(self.store.settings.get("auto_download_since") or 0)
         skipped = 0
         for rec in records:
             cur = self.store.sessions.get(rec["live_key"], {})
-            if cur.get("status") != "new" or not is_ready(rec):
+            if cur.get("status") != "new" or cur.get("no_auto") or not is_ready(rec):
                 continue
             if since and int(rec["start_time"]) < since:
                 skipped += 1          # 起始时间之前开播：不自动下载
@@ -153,9 +155,10 @@ class Scheduler:
                 self.store.log(f"检查失败：{e}", "error")
                 return
             if result is not None:
-                _, added = result
-                if added:
-                    self.store.log(f"检查完成，新增 {added} 场")
+                _, added, revived = result
+                if added or revived:
+                    self.store.log(f"检查完成，新增 {added} 场"
+                                   + (f"，恢复已删除 {revived} 场" if revived else ""))
         finally:
             self.last_run = time.time()
             self.next_run = self.last_run + self._interval_sec()

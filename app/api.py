@@ -197,9 +197,10 @@ class Api:
             return {"ok": False, "message": str(e)}
         if result is None:    # 与定时检查互斥，一轮结束后再试
             return {"ok": False, "message": "已有检查在进行中"}
-        total, added = result
-        self._store.log(f"手动刷新完成：{total} 场，新增 {added} 场")
-        return {"ok": True, "total": total, "added": added}
+        total, added, revived = result
+        self._store.log(f"手动刷新完成：{total} 场，新增 {added} 场"
+                        + (f"，恢复已删除 {revived} 场" if revived else ""))
+        return {"ok": True, "total": total, "added": added, "revived": revived}
 
     def start_download(self, live_key: str) -> dict:
         status = self._manager.start(live_key)

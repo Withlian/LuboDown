@@ -57,7 +57,10 @@
 
     async refreshList(btn) {
       const r = await Motion.busy(btn, () => this.api.call("refresh_list"));
-      if (r && r.ok) { this.toast(`刷新完成：共 ${r.total} 场，新增 ${r.added} 场`, "ok"); this.store.refresh(); }
+      if (r && r.ok) {
+        this.toast(`刷新完成：共 ${r.total} 场，新增 ${r.added} 场${r.revived ? `，恢复已删除 ${r.revived} 场` : ""}`, "ok");
+        this.store.refresh();
+      }
       else if (r) this.toast(r.message || "刷新失败", "err");
     }
 
@@ -201,7 +204,10 @@
       if (r && r.ok) {
         const slot = btn.closest(".slot");
         if (slot) await Motion.collapse(slot);
-        this.toast("已删除，可在「最近删除」中恢复", "ok");
+        const revive = (this.store.state.settings || {}).revive_deleted;
+        // 回归依赖 B 站仍返回该场（回放约保留 14 天），更早的场次只能在「最近删除」中恢复
+        this.toast(revive ? "已删除，B 站仍有该回放时刷新后会回到列表，也可在「最近删除」中恢复"
+          : "已删除，可在「最近删除」中恢复", "ok");
         this.store.refresh();
       } else if (r) {
         this.toast(r.message || "删除失败", "err");

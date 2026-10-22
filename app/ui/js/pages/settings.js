@@ -24,6 +24,7 @@
         "#sel-concurrency": ["change", (e) => save({ concurrency: Number(e.target.value) }, "并发数已保存")],
         "#sw-keep-parts": ["change", (e) => save({ keep_parts: e.target.checked }, e.target.checked ? "将保留分段文件" : "分段文件将在合成后清除")],
         "#sw-name-anchor": ["change", (e) => save({ name_with_anchor: e.target.checked }, e.target.checked ? "新下载的文件名将包含主播名与开播时间" : "文件名保持纯日期序号格式")],
+        "#sw-revive-deleted": ["change", (e) => save({ revive_deleted: e.target.checked }, e.target.checked ? "删除的场次将在刷新后回到列表" : "删除的场次刷新后不再出现，可在「最近删除」中恢复")],
         "#sel-win-preset": ["change", (e) => {
           if (e.target.value === "custom") { $("#in-win-w").focus(); return; }
           [$("#in-win-w").value, $("#in-win-h").value] = e.target.value.split("x");
@@ -50,7 +51,7 @@
     render(state) {
       const s = state.settings || {};
       const sig = JSON.stringify([s.has_sessdata, s.has_bili_jct, s.anchors, s.download_dir,
-        s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor, s.window_width, s.window_height]);
+        s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor, s.revive_deleted, s.window_width, s.window_height]);
       if (sig === this.sig) return;
       this.sig = sig;
       const setVal = (id, v) => { const el = $(id); if (document.activeElement !== el) el.value = v; };
@@ -62,6 +63,7 @@
       $("#sel-concurrency").value = String(s.concurrency || 6);
       $("#sw-keep-parts").checked = !!s.keep_parts;
       $("#sw-name-anchor").checked = !!s.name_with_anchor;
+      $("#sw-revive-deleted").checked = !!s.revive_deleted;
       $("#in-sessdata").placeholder = s.has_sessdata ? "已保存" : "尚未填写";
       $("#in-bili-jct").placeholder = s.has_bili_jct ? "已保存" : "尚未填写";
       $("#anchor-chips").innerHTML = (s.anchors || []).map((a) =>
