@@ -321,7 +321,7 @@ class DownloadManager:
         s = self.store.settings
         # —— 前置检查 ——
         if not s.get("sessdata"):
-            self._fail(job, "未配置 SESSDATA，请先在设置中填写")
+            self._fail(job, "尚未登录 B 站账号，请先在设置中扫码登录")
             return
         ffmpeg = resolve_ffmpeg(s)
         if ffmpeg is None:

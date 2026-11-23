@@ -74,8 +74,9 @@
     render(state) {
       const cookie = $("#st-cookie"), ffmpeg = $("#st-ffmpeg");
       const hasCookie = !!(state.settings && state.settings.has_sessdata);
+      const accName = (state.settings && state.settings.user_name) || "";
       cookie.className = "status-item" + (hasCookie ? " ok" : "");
-      cookie.title = hasCookie ? "Cookie 已配置" : "Cookie 未配置，请在设置中填写";
+      cookie.title = hasCookie ? `已登录：${accName || "B 站账号"}` : "尚未登录，请在设置中扫码登录";
       ffmpeg.className = "status-item" + (state.ffmpeg_ok ? " ok" : " warn");
       ffmpeg.title = state.ffmpeg_ok ? "ffmpeg 正常" : "未找到 ffmpeg，请在设置中指定";
       Object.values(this.pages).forEach((p) => p.render(state));

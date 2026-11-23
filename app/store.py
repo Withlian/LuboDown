@@ -30,6 +30,9 @@ DELETED_KEEP_SEC = 30 * 86400
 SETTING_SPECS = {
     "sessdata": ("", None, None),           # 凭证，只存本机
     "bili_jct": ("", None, None),
+    "dede_user_id": ("", None, None),       # 扫码登录时一并写入，nav 等账号接口需要
+    "user_name": ("", None, None),          # 账号昵称，仅用于界面展示
+    "user_face": ("", None, None),          # 账号头像 URL，仅用于界面展示
     "anchors": ([], None, None),            # 关注的主播，只经 add/remove_anchor 增删
     "download_dir": ("", None, None),       # 空 = 跟随程序所在目录下的 downloads，归一见 _normalize_download_dir
     "check_interval_min": (60, 5, 10_080),  # 定时检查间隔（分钟）

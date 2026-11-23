@@ -109,6 +109,12 @@ def _run():
     else:
         ui_base = Path(__file__).parent
 
+    # 用 file:// 直接加载前端：pywebview 对本地路径会起一个 127.0.0.1 的内置 HTTP 服务，
+    # 而监听回环端口会被防火墙/安全软件拦截（打包成 exe 后尤其常见），表现为主窗口一片空白、
+    # 且只在 WebView2 里报 ERR_CONNECTION_TIMED_OUT。JS 桥接走 WebView2 原生消息通道，
+    # 不依赖这个 HTTP 服务，故改为 file:// 后功能不变、也不再需要任何网络监听。
+    ui_index = ui_base / "ui" / "index.html"
+
     # 无边框圆角窗口：标题栏与窗口按钮由前端绘制，拖动/缩放/圆角见 WindowFrame
     # 窗口大小固定（不能拖边缘或最大化），尺寸在设置中修改；下限取设置区间的下界
     min_size = (SETTING_SPECS["window_width"][1], SETTING_SPECS["window_height"][1])
@@ -120,7 +126,7 @@ def _run():
         width, height = 1240, 820
     window = webview.create_window(
         f"LuboDown v{__version__} · B站直播回放下载",
-        str(ui_base / "ui" / "index.html"),
+        ui_index.as_uri(),
         js_api=api,
         width=width, height=height,
         min_size=min_size, resizable=False,

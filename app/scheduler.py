@@ -7,6 +7,8 @@ from __future__ import annotations
 import threading
 import time
 
+from .bilibili import ApiError
+
 
 READY_GRACE_SEC = 30 * 60   # duration 缺失时，结束后多久视为切片已就绪
 
@@ -99,7 +101,11 @@ class Scheduler:
                     items = self.client.fetch_all_replays(uid)
                 except Exception as e:
                     last_err = e
-                    self.store.log(f"获取主播 {name} 的回放列表失败：{e}", "error")
+                    hint = ""
+                    if isinstance(e, ApiError) and e.code == 301:
+                        # 301 也可能是「填的不是主播 UID」，光看提示会误判成没授权
+                        hint = "（若权限已开通，多半是把直播间房号当成了主播 UID，请改用 UID）"
+                    self.store.log(f"获取主播 {name} 的回放列表失败：{e}{hint}", "error")
                     continue
                 fetched += 1
                 records = [_to_record(uid, name, it) for it in items if it.get("live_key")]
@@ -146,7 +152,7 @@ class Scheduler:
     def _check(self):
         try:
             if not self.store.settings.get("sessdata"):
-                self.store.log("未配置 SESSDATA，跳过检查", "error")
+                self.store.log("尚未登录 B 站账号，跳过检查", "error")
                 return
             try:
                 result = self.run_check(

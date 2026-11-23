@@ -14,9 +14,13 @@ Release 包已内置 ffmpeg；从源码运行时 `bin/ffmpeg.exe` 不入库，�
 
 ## 使用
 
-1. **设置 → B站凭证**：填入 `SESSDATA` 与 `bili_jct`（F12 → 应用 → Cookie），点「检测有效性」；
+1. **设置 → B站账号**：用「哔哩哔哩」App 扫描界面上的二维码，手机上确认即可登录，
+   无需再手动找 Cookie；登录后卡片显示头像与昵称，可随时「退出登录」。
+   扫码不便时可在下方「手动填写 Cookie（备用）」里粘贴 `SESSDATA` 与 `bili_jct`。
+   登录完成后点「检测有效性」可确认各主播的「回放剪辑权限」是否到位；
 2. **关注的主播**：默认为空，添加主播的 UID（space.bilibili.com 网址里的数字）即可，
-   需要该主播给你的账号开通「回放剪辑权限」；
+   填直播间房号（live.bilibili.com 网址里的数字）也能识别，会自动换算成主播 UID；
+   需要该主播给你的账号开通「回放剪辑权限」（提示 301 时先确认填的是 UID 而非房号）；
 3. **回放列表**：卡片展示最近约 14 天的场次，可按主播/状态筛选、搜索与排序，在此发现场次并开始下载；
    **下载页**集中管理下载进度、速度与暂停/继续/重试；
 4. **定时任务**：开启定时检查，可选自动下载新场次；「起始时间」可控制只自动下载该时间之后开播的场次（更早的只进列表，手动点下载不受影响）；
@@ -27,7 +31,7 @@ Release 包已内置 ffmpeg；从源码运行时 `bin/ffmpeg.exe` 不入库，�
 - **同一台电脑随意移动文件夹**：所有路径（配置、下载目录、ffmpeg）都相对程序所在目录推导，
   整个文件夹剪切到任何位置后直接 `启动LuboDown.bat` 即可；
 - **换新电脑**：需先安装 Python 3.10+（勾选 Add to PATH），首次双击启动脚本会自动安装
-  依赖（pywebview / pystray / pillow）；ffmpeg 已内置在 `bin/`，WebView2 运行时
+  依赖（pywebview / pystray / pillow / qrcode）；ffmpeg 已内置在 `bin/`，WebView2 运行时
   Windows 10/11 自带。不支持非 Windows 系统；
 - 若曾自定义过下载目录（其他盘符路径），移动后该设置仍指向原位置，需要在设置里改一次。
 
@@ -39,7 +43,10 @@ Release 包已内置 ffmpeg；从源码运行时 `bin/ffmpeg.exe` 不入库，�
 - 整场 1080p 回放约 20GB/4.5 小时（约 10Mbps），分段并发下载后由 ffmpeg 无损合成；
 - **ffmpeg 已内置于 `bin/ffmpeg.exe`**，无需安装；设置里也可指定其他路径；
 - 启动脚本用 `pythonw` 后台运行，CMD 窗口随即关闭；
-- 凭证仅保存在本机 `config/settings.json`；
+- 凭证仅保存在本机 `config/settings.json`（扫码登录后写入 `SESSDATA` / `bili_jct` / `DedeUserID`）；
+- **扫码登录**：走 B 站官方 passport 的二维码接口（`qrcode/generate` + `qrcode/poll`），
+  与 JLiverTool 的实现一致；登录态用手机 App 确认，本程序不接触账号密码。
+  二维码 3 分钟内有效，过期后点「刷新二维码」即可；
 - 在列表中删除的场次默认会在下次刷新/检查时回到列表（仅限 B 站仍保留该回放，约 14 天；回到未下载状态，不会被自动下载，需要时手动下载）；
   设置 → 下载 中关闭「刷新后恢复已删除的场次」后，删除过的场次不再重新入库；
   两种情况下删除记录都保存在 `config/deleted.json`（保留 30 天），期间可在回放列表的「最近删除」标签中手动恢复；
@@ -53,12 +60,23 @@ app/
 ├── main.py         入口：窗口 + 托盘 + 单实例锁
 ├── api.py          前端 JS 桥接层
 ├── bilibili.py     B站接口客户端 + 安全请求层（https 白名单/公网IP固定）
+├── qrlogin.py      扫码登录（生成二维码/轮询状态/换取 Cookie）
 ├── downloader.py   并发分段下载（断点续传/签名刷新）+ ffmpeg 合成
 ├── scheduler.py    定时检查/自动下载
 ├── store.py        配置与会话持久化
 ├── window_frame.py 无边框圆角窗口的原生行为（拖动/缩放/最大化/圆角）
 └── ui/             前端（原生 HTML/CSS/JS，按 css/ 与 js/ 模块组织）
 ```
+
+## 打包
+
+```bat
+pip install -r requirements.txt pyinstaller
+pyinstaller --noconfirm LuboDown.spec
+```
+
+产物为 `dist/LuboDown/`（单目录，含 `LuboDown.exe`、内置 `bin/ffmpeg.exe` 与前端资源），
+整个目录可便携移动。`config/` 与 `downloads/` 在首次运行时于 exe 同级目录下创建。
 
 ## 开源许可
 

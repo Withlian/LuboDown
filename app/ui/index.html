@@ -264,28 +264,64 @@
     <section id="page-settings" class="page">
       <div class="grid-2">
         <div class="card">
-          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-key"/></svg></span><h3>B站凭证</h3></div>
-          <p class="desc">浏览器登录 B 站后，F12 → 应用/Application → Cookie → 找到
-            <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；凭证只保存在本机。</p>
-          <label class="field">
-            <span>SESSDATA</span>
-            <div class="pw-wrap">
-              <input type="password" id="in-sessdata" autocomplete="off">
-              <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
+          <div class="card-head"><span class="card-ico"><svg class="ico"><use href="#i-key"/></svg></span><h3>B站账号</h3></div>
+
+          <!-- 未登录：扫码 -->
+          <div id="qr-panel" class="qr-panel" hidden>
+            <div class="qr-stage" id="qr-stage">
+              <img id="qr-img" alt="B站登录二维码" hidden>
+              <div class="qr-placeholder" id="qr-placeholder">正在生成…</div>
+              <div class="qr-mask" id="qr-mask" hidden>
+                <span id="qr-mask-text">二维码已过期</span>
+                <button class="btn primary small" id="btn-qr-refresh">刷新</button>
+              </div>
             </div>
-          </label>
-          <label class="field">
-            <span>bili_jct</span>
-            <div class="pw-wrap">
-              <input type="password" id="in-bili-jct" autocomplete="off">
-              <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
+            <div class="qr-side">
+              <p class="qr-title">用 <b>哔哩哔哩 App</b> 扫码登录</p>
+              <p class="hint">打开 App → 右上角「扫一扫」→ 扫描左侧二维码，并在手机上确认。</p>
+              <p class="qr-status" id="qr-status"><span class="qr-dot"></span><span id="qr-status-text">正在生成二维码…</span></p>
+              <button class="btn ghost small" id="btn-qr-reload"><svg class="ico"><use href="#i-refresh"/></svg><span>刷新二维码</span></button>
             </div>
-          </label>
+          </div>
+
+          <!-- 已登录：账号卡 -->
+          <div id="account-panel" class="account-panel" hidden>
+            <img id="acc-face" class="acc-face" alt="">
+            <div class="acc-meta">
+              <strong id="acc-name">已登录</strong>
+              <span class="hint" id="acc-uid"></span>
+            </div>
+            <button class="btn ghost small" id="btn-logout">退出登录</button>
+          </div>
+
           <div class="row gap">
-            <button class="btn primary" id="btn-save-cred">保存凭证</button>
             <button class="btn secondary" id="btn-verify">检测有效性</button>
             <span id="verify-result" class="hint"></span>
           </div>
+
+          <!-- 手动 Cookie：保留作为备用通道（如扫码不便时） -->
+          <details class="manual" id="manual-cookie">
+            <summary>手动填写 Cookie（备用）</summary>
+            <p class="desc">浏览器登录 B 站后，F12 → 应用/Application → Cookie → 找到
+              <code>SESSDATA</code> 与 <code>bili_jct</code> 复制其值填入；凭证只保存在本机。</p>
+            <label class="field">
+              <span>SESSDATA</span>
+              <div class="pw-wrap">
+                <input type="password" id="in-sessdata" autocomplete="off">
+                <button class="pw-eye" data-for="in-sessdata" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
+              </div>
+            </label>
+            <label class="field">
+              <span>bili_jct</span>
+              <div class="pw-wrap">
+                <input type="password" id="in-bili-jct" autocomplete="off">
+                <button class="pw-eye" data-for="in-bili-jct" title="显示/隐藏"><svg class="ico"><use href="#i-eye"/></svg></button>
+              </div>
+            </label>
+            <div class="row tight">
+              <button class="btn primary small" id="btn-save-cred">保存凭证</button>
+            </div>
+          </details>
         </div>
 
         <div class="card">
@@ -293,7 +329,7 @@
           <p class="desc">需要该主播为你的账号开通回放剪辑权限，否则无法获取其回放。</p>
           <div id="anchor-chips" class="anchor-chips"></div>
           <div class="row gap">
-            <input type="text" id="in-uid" placeholder="输入主播 UID（space.bilibili.com 后的数字）" class="grow">
+            <input type="text" id="in-uid" placeholder="主播 UID 或直播间房号（live.bilibili.com 后的数字）" class="grow">
             <button class="btn primary" id="btn-add-anchor"><svg class="ico"><use href="#i-plus"/></svg><span>添加</span></button>
           </div>
         </div>
