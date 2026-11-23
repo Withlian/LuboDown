@@ -190,9 +190,72 @@
 .log-card { margin-top: 20px; }
 .next-run { font-size: 13px; font-variant-numeric: tabular-nums; }
 
+/* ============ 设置：B 站账号（扫码登录） ============ */
+.qr-panel { display: flex; gap: 18px; align-items: center; margin: 4px 0 8px; }
+.qr-stage {
+  position: relative; flex-shrink: 0;
+  width: 164px; height: 164px;
+  border-radius: var(--r-sm);
+  background: #fff;                       /* 二维码必须白底，暗色主题下也不跟随 */
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: grid; place-items: center; overflow: hidden;
+}
+.qr-stage img { width: 152px; height: 152px; display: block; transition: filter .25s var(--ease), opacity .25s var(--ease); }
+.qr-stage img.dim { filter: blur(1.5px); opacity: .62; }
+.qr-placeholder { font-size: 12px; color: #A9A3AB; }
+.qr-mask {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  /* 半透明白纱：既要让人看出二维码已失效，又保留一点底纹，避免变成一块空白 */
+  background: #FFFFFFC4;
+  font-size: 12px; color: var(--fg-2); text-align: center; padding: 10px;
+}
+.qr-side { flex: 1; min-width: 0; }
+.qr-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.qr-title b { color: var(--primary-text); }
+.qr-side .hint { line-height: 1.6; }
+.qr-status {
+  display: flex; align-items: center; gap: 7px;
+  margin: 12px 0 8px; font-size: 13px; color: var(--fg-2); min-height: 20px;
+}
+.qr-status.ok { color: var(--ok); }
+.qr-status.err { color: var(--err); }
+.qr-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--primary); animation: qr-pulse 1.4s var(--ease) infinite;
+}
+.qr-status.ok .qr-dot { background: var(--ok); animation: none; }
+.qr-status.err .qr-dot { background: var(--err); animation: none; }
+@keyframes qr-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.72); } }
+
+.account-panel {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0 8px; padding: 12px 14px;
+  border-radius: var(--r-sm); background: var(--surface-2);
+}
+.acc-face { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--surface-3); }
+.acc-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.acc-meta strong { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+details.manual { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+details.manual > summary {
+  cursor: pointer; font-size: 13px; color: var(--fg-2); list-style: none;
+  display: flex; align-items: center; gap: 6px; user-select: none;
+}
+details.manual > summary::-webkit-details-marker { display: none; }
+details.manual > summary::before {
+  content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor; transform: rotate(-45deg); transition: transform .2s var(--ease);
+}
+details.manual[open] > summary::before { transform: rotate(45deg); }
+details.manual > summary:hover { color: var(--fg); }
+details.manual .field:first-of-type { margin-top: 10px; }
+
 @media (max-width: 1100px) {
   .grid-2 { grid-template-columns: 1fr; }
   .hero-row { grid-template-columns: 1fr; }
   .dl-row { grid-template-columns: 48px minmax(0, 1fr) auto; }
   .dl-progress { grid-column: 2 / -1; grid-row: 2; }
+  .qr-panel { flex-direction: column; align-items: flex-start; }
 }

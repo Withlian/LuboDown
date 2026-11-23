@@ -1,3 +1,4 @@
-pywebview>=5.4
+pywebview>=5.4,<6
 pystray>=0.19
 pillow>=10.0
+qrcode>=7.4

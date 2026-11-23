@@ -1,18 +1,35 @@
-/* 设置页：B 站凭证、关注的主播、下载目录与并发、ffmpeg 路径。 */
+/* 设置页：B 站账号（扫码登录）、关注的主播、下载目录与并发、ffmpeg 路径。 */
 (function (Lubo) {
   "use strict";
 
   const { $, $$, esc, icon } = Lubo.util;
   const { Motion } = Lubo;
 
+  /** 后端状态 -> 界面文案 */
+  const QR_TEXT = {
+    idle: "尚未开始",
+    loading: "正在生成二维码…",
+    waiting: "等待扫码…",
+    scanned: "已扫码，请在手机上确认登录",
+    success: "登录成功",
+    expired: "二维码已过期，请刷新",
+    error: "生成失败，请刷新重试",
+  };
+
   class SettingsPage extends Lubo.Page {
     constructor(app, root) {
       super(app, root);
       this.sig = "";
+      this.loggedIn = false;
+      this.qrState = "idle";
+      this.qrTimer = 0;
       const save = (patch, msg) => this.store.save(patch).then((r) => r && r.ok && msg && this.toast(msg, "ok"));
       this.bind({
         "#btn-save-cred": ["click", (e) => this.saveCredentials(e.currentTarget)],
         "#btn-verify": ["click", (e) => this.verify(e.currentTarget)],
+        "#btn-qr-reload": ["click", () => this.startQr()],
+        "#btn-qr-refresh": ["click", () => this.startQr()],
+        "#btn-logout": ["click", (e) => this.logout(e.currentTarget)],
         "#btn-add-anchor": ["click", (e) => this.addAnchor(e.currentTarget)],
         "#in-uid": ["keydown", (e) => { if (e.key === "Enter") $("#btn-add-anchor").click(); }],
         "#btn-browse": ["click", (e) => this.browse(e.currentTarget)],
@@ -44,14 +61,29 @@
         const input = $("#" + b.dataset.for);
         input.type = input.type === "password" ? "text" : "password";
       }));
+      $("#acc-face").addEventListener("error", (e) => { e.target.hidden = true; });
     }
 
     get title() { return "设置"; }
 
+    /** 进入设置页：未登录则确保有一张有效的二维码（离开再回来不重新生成） */
+    async onShow() {
+      if (this.loggedIn) return;
+      const s = await this.api.call("qr_status");
+      if (!s) return;
+      if (s.state === "waiting" || s.state === "scanned") {
+        this.applyQr(s);
+        this.pollQr();
+      } else {
+        this.startQr();
+      }
+    }
+
     render(state) {
       const s = state.settings || {};
-      const sig = JSON.stringify([s.has_sessdata, s.has_bili_jct, s.anchors, s.download_dir,
-        s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor, s.revive_deleted, s.window_width, s.window_height]);
+      const sig = JSON.stringify([s.has_sessdata, s.has_bili_jct, s.user_name, s.user_face, s.dede_user_id,
+        s.anchors, s.download_dir, s.ffmpeg_path, s.concurrency, s.keep_parts, s.name_with_anchor,
+        s.revive_deleted, s.window_width, s.window_height]);
       if (sig === this.sig) return;
       this.sig = sig;
       const setVal = (id, v) => { const el = $(id); if (document.activeElement !== el) el.value = v; };
@@ -70,6 +102,110 @@
         `<span class="anchor-chip">${esc(a.name)}<small>${esc(a.uid)}</small>
           <button class="icon-btn del" data-uid="${esc(a.uid)}" title="移除">${icon("x")}</button></span>`).join("")
         || `<span class="hint">尚未添加主播</span>`;
+      this.renderAccount(s);
+    }
+
+    /** 已登录 -> 账号卡；未登录 -> 二维码面板 */
+    renderAccount(s) {
+      const logged = !!s.has_sessdata;
+      const wasLogged = this.loggedIn;
+      this.loggedIn = logged;
+      $("#qr-panel").hidden = logged;
+      $("#account-panel").hidden = !logged;
+      if (!logged) {
+        // 刚退出登录（或凭证被清空）：作废旧码，等 onShow/登出流程重新生成
+        if (wasLogged) this.qrState = "idle";
+        return;
+      }
+      this.stopPolling();
+      $("#acc-name").textContent = s.user_name || "已登录";
+      $("#acc-uid").textContent = s.dede_user_id ? `UID ${s.dede_user_id}` : "凭证已保存在本机";
+      const face = $("#acc-face");
+      if (s.user_face) {
+        face.src = s.user_face;
+        face.hidden = false;
+      } else {
+        face.hidden = true;
+        face.removeAttribute("src");
+      }
+    }
+
+    // ---------- 扫码登录 ----------
+    async startQr() {
+      if (this.loggedIn) return;
+      this.stopPolling();
+      this.applyQr({ state: "loading", message: QR_TEXT.loading });
+      const s = await this.api.call("qr_start");
+      if (!s) {
+        this.applyQr({ state: "error", message: "无法连接后端，请重启程序" });
+        return;
+      }
+      this.applyQr(s);
+      if (s.state === "waiting" || s.state === "scanned") this.pollQr();
+    }
+
+    applyQr(s) {
+      this.qrState = s.state || "idle";
+      const dead = s.state === "expired" || s.state === "error";
+      const img = $("#qr-img"), ph = $("#qr-placeholder"), mask = $("#qr-mask");
+      if (s.image) {
+        if (img.getAttribute("src") !== s.image) img.src = s.image;
+        img.hidden = false;
+        ph.hidden = true;
+      } else if (s.state === "loading") {
+        img.hidden = true;
+        ph.hidden = false;
+        ph.textContent = "正在生成…";
+      }
+      mask.hidden = !dead;
+      if (dead) {
+        $("#qr-mask-text").textContent = s.state === "expired" ? "二维码已过期" : "生成失败";
+        img.classList.add("dim");
+      } else {
+        img.classList.remove("dim");
+      }
+      const st = $("#qr-status");
+      st.className = "qr-status"
+        + (s.state === "success" ? " ok" : "")
+        + (dead ? " err" : "");
+      $("#qr-status-text").textContent = s.message || QR_TEXT[this.qrState] || "";
+    }
+
+    /** 1.2s 取一次状态；离开设置页时跳过请求，回来后由 onShow 恢复 */
+    pollQr() {
+      this.stopPolling();
+      this.qrTimer = setInterval(async () => {
+        if (this.qrState === "success" || this.qrState === "expired" || this.qrState === "error") {
+          this.stopPolling();
+          return;
+        }
+        if (!this.root.classList.contains("active")) return;
+        const s = await this.api.call("qr_status");
+        if (!s) return;
+        this.applyQr(s);
+        if (s.state === "success") {
+          this.stopPolling();
+          this.qrState = "idle";
+          this.toast(s.message || "登录成功", "ok");
+          this.store.refresh();
+        }
+      }, 1200);
+    }
+
+    stopPolling() {
+      if (this.qrTimer) {
+        clearInterval(this.qrTimer);
+        this.qrTimer = 0;
+      }
+    }
+
+    async logout(btn) {
+      const r = await Motion.busy(btn, () => this.api.call("logout"));
+      if (!r || !r.ok) return;
+      this.toast("已退出登录", "ok");
+      this.qrState = "idle";
+      await this.store.refresh();
+      this.startQr();
     }
 
     async saveCredentials(btn) {
@@ -82,7 +218,9 @@
       const r = await Motion.busy(btn, () => this.store.save(patch));
       if (r && r.ok) {
         $("#in-sessdata").value = $("#in-bili-jct").value = "";
-        this.toast("凭证已保存", "ok");
+        const acc = await this.api.call("account_info");   // 补齐昵称头像，失败不影响凭证本身
+        this.store.refresh();
+        this.toast(acc && acc.ok ? `凭证已保存：${acc.name}` : "凭证已保存", "ok");
       }
     }
 
@@ -101,7 +239,7 @@
       if (!uid) return;
       const r = await Motion.busy(btn, () => this.api.call("add_anchor", uid));
       if (r && r.ok) {
-        this.toast(`已添加：${r.name}`, "ok");
+        this.toast(r.message || `已添加：${r.name}`, "ok");
         $("#in-uid").value = "";
         this.store.refresh();
       } else if (r) {

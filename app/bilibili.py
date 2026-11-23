@@ -81,13 +81,13 @@ def _resolve_global(host: str) -> list[str]:
     return ips
 
 
-def check_url(url: str) -> tuple[str, list[str]]:
-    """校验并固定 URL。返回 (hostname, 公网IP列表)。"""
+def check_url(url: str, suffixes: tuple[str, ...] = ALLOWED_SUFFIXES) -> tuple[str, list[str]]:
+    """校验并固定 URL。返回 (hostname, 公网IP列表)。suffixes 供扫码登录放宽到 passport 域名。"""
     p = urllib.parse.urlparse(url)
     if p.scheme != "https":
         raise RequestBlocked(f"拒绝非 https 请求: {url[:80]}")
     host = (p.hostname or "").lower()
-    if not any(host == s or host.endswith("." + s) for s in ALLOWED_SUFFIXES):
+    if not any(host == s or host.endswith("." + s) for s in suffixes):
         raise RequestBlocked(f"拒绝非白名单域名: {host}")
     return host, _resolve_global(host)
 
@@ -187,10 +187,13 @@ def request(url: str, cookie: str = "", timeout: int = 30, retries: int = 2,
     raise ApiError(-1, msg)
 
 
-def cookie_str(sessdata: str, bili_jct: str) -> str:
+def cookie_str(sessdata: str, bili_jct: str, dede_user_id: str = "") -> str:
+    """拼 Cookie 头。DedeUserID 并非所有接口都需要，但 nav 等账号接口缺它会判未登录。"""
     pairs = [f"SESSDATA={sessdata}"] if sessdata else []
     if bili_jct:
         pairs.append(f"bili_jct={bili_jct}")
+    if dede_user_id:
+        pairs.append(f"DedeUserID={dede_user_id}")
     return "; ".join(pairs)
 
 
@@ -203,14 +206,58 @@ class BiliClient:
 
     def _cookie(self) -> str:
         s = self.store.settings
-        return cookie_str(s.get("sessdata", ""), s.get("bili_jct", ""))
+        return cookie_str(s.get("sessdata", ""), s.get("bili_jct", ""),
+                          s.get("dede_user_id", ""))
 
     def get_master_info(self, uid: int) -> dict:
-        """公开接口：uid -> {name, room_id}，用于添加主播时自动取名。"""
+        """公开接口：uid -> {name, room_id}，用于添加主播时自动取名。
+
+        注意：该接口对不存在的 uid 也返回 code=0，只是 uname 为空、room_id 为 0，
+        所以「是否有效主播」必须用 name 是否为空判断，不能只看 code。
+        """
         r = request(f"{API_BASE}/live_user/v1/Master/info?uid={uid}")
-        info = r.get("data", {}).get("info", {})
-        return {"name": info.get("uname", str(uid)),
-                "room_id": r.get("data", {}).get("room_info", {}).get("room_id")}
+        data = r.get("data") or {}
+        info = data.get("info") or {}
+        return {"name": info.get("uname") or "",
+                "room_id": data.get("room_id") or None}
+
+    def get_room_info(self, room_id: int) -> dict | None:
+        """房间号 -> {uid, room_id, title}。房间不存在或未开播返回 None。"""
+        try:
+            r = request(f"{API_BASE}/room/v1/Room/get_info?room_id={room_id}")
+        except ApiError:
+            return None
+        d = r.get("data") or {}
+        if not d.get("uid"):
+            return None
+        return {"uid": int(d["uid"]),
+                "room_id": int(d.get("room_id") or 0),
+                "title": d.get("title") or ""}
+
+    def resolve_anchor(self, value: int) -> dict:
+        """把用户输入识别成主播：先当 UID，失败再当直播间房号。
+
+        用户常直接粘 live.bilibili.com/81004 里的房间号，而回放接口要的是 UID，
+        传错会得到 [-301 没有剪辑权限]，看起来像「没授权」其实主播都找错了。
+        返回 {uid, name, room_id, via_room, valid}；valid=False 表示既不是主播也不是房间。
+        """
+        try:
+            info = self.get_master_info(value)
+        except ApiError:
+            info = {"name": "", "room_id": None}
+        if info["name"]:
+            return {"uid": value, "name": info["name"], "room_id": info["room_id"],
+                    "via_room": False, "valid": True}
+        room = self.get_room_info(value)
+        if room:
+            r_uid = room["uid"]
+            try:
+                name = self.get_master_info(r_uid)["name"]
+            except ApiError:
+                name = ""
+            return {"uid": r_uid, "name": name or str(r_uid), "room_id": room["room_id"],
+                    "via_room": True, "valid": True}
+        return {"uid": value, "name": "", "room_id": None, "via_room": False, "valid": False}
 
     def get_replay_list(self, uid: int, page: int = 1, page_size: int = 20) -> dict:
         """他人回放列表（需该主播授权剪辑权限）。time_range=3 即近14天。
@@ -252,8 +299,27 @@ class BiliClient:
         entries.sort(key=lambda e: e["start_time"])
         return entries
 
+    def get_account(self) -> dict | None:
+        """当前登录账号（nav 接口）：{mid, name, face}。未登录或凭证失效返回 None。"""
+        try:
+            r = request("https://api.bilibili.com/x/web-interface/nav", cookie=self._cookie())
+        except ApiError:
+            return None
+        data = r.get("data") or {}
+        if not data.get("isLogin"):
+            return None
+        return {"mid": int(data.get("mid") or 0),
+                "name": data.get("uname") or "",
+                "face": data.get("face") or ""}
+
     def verify_login(self) -> dict:
-        """用列表接口探测登录态与各主播的剪辑权限（逐个尝试，任一通过即可）。"""
+        """用列表接口探测登录态与各主播的剪辑权限（逐个尝试，任一通过即可）。
+
+        失败时区分三种情况，避免把「UID 填错」误报成「未授权」：
+          1. -101       登录态失效；
+          2. 301 + 该账号根本不是主播（常见于把直播间房号当 UID）→ 返回可自动修正的 fix；
+          3. 301 + 主播存在        → 真正的未授权。
+        """
         anchors = self.store.settings.get("anchors", [])
         parsed = []
         for a in anchors:
@@ -265,18 +331,34 @@ class BiliClient:
             return {"ok": False,
                     "message": "未配置主播" if not anchors else "主播配置异常，请在设置中重新添加"}
         denied: list[str] = []
+        wrong: list[str] = []
+        fixes: list[dict] = []
         last_err = ""
         for uid, name in parsed:
             try:
                 self.get_replay_list(uid, page=1, page_size=1)
-                return {"ok": True, "message": f"Cookie 有效，{name} 已授权剪辑权限"}
+                return {"ok": True, "message": f"登录有效，{name} 已授权剪辑权限", "fix": fixes}
             except ApiError as e:
                 if e.code == -101:   # 登录态全局无效，无需再试其余主播
-                    return {"ok": False, "message": "SESSDATA 无效或已过期（账号未登录）"}
+                    return {"ok": False, "message": "登录态已失效，请在设置中重新扫码登录"}
                 if e.code == 301:
-                    denied.append(name)
+                    hit = self.resolve_anchor(uid)
+                    if hit["valid"] and hit["via_room"]:
+                        # 输入的是房间号：不是权限问题，记下正确 UID 供上层自动修正
+                        fixes.append({"from": uid, "to": hit["uid"], "name": hit["name"]})
+                        wrong.append(f"{uid} 是直播间房号（主播 UID 应为 {hit['uid']}）")
+                    elif hit["valid"]:
+                        denied.append(f"{name}（UID {uid}）")
+                    else:
+                        wrong.append(f"{uid}（查不到这个主播，请确认填的是 UID）")
                 else:
-                    last_err = e.message
+                    last_err = f"[{e.code}] {e.message}"
+        parts = []
         if denied:
-            return {"ok": False, "message": f"已登录，但 {'、'.join(denied)} 未授权你的剪辑权限"}
-        return {"ok": False, "message": last_err or "检测失败"}
+            parts.append(f"{'、'.join(denied)} 未授权你的剪辑权限")
+        if wrong:
+            parts.append(f"{'、'.join(wrong)}")
+        if not parts:
+            return {"ok": False, "message": last_err or "检测失败"}
+        return {"ok": False, "message": "已登录，但 " + "；".join(parts), "fix": fixes}
+

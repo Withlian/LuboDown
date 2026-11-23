@@ -9,6 +9,8 @@ body {
 }
 button, input, select { font: inherit; color: inherit; }
 ul { list-style: none; }
+/* hidden 属性统一生效：作者样式里的 display 会盖掉 UA 的 [hidden]{display:none} */
+[hidden] { display: none !important; }
 
 .ico {
   width: 16px; height: 16px; flex-shrink: 0;

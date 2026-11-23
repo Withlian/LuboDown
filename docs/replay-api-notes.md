@@ -60,9 +60,26 @@ alarm_info{code, message, is_ban_publish}
 
 - `-101` 未登录（无 Cookie 实测确认）
 - `-111` csrf 校验失败
-- `301` 没有剪辑权限（未获主播授权）
+- `301` 没有剪辑权限（未获主播授权；**也可能是 `live_uid` 传成了直播间房号或非主播 uid**，见下）
 - `202` 场次无效（live_key 与 start/end 不匹配）
 - `-30` 回放合成失败；`30` 合成完成
+
+## 易踩的坑：`live_uid` 必须是主播 UID，不是直播间房号
+
+用户很容易直接粘贴 `live.bilibili.com/81004` 里的**房号**，而 `GetOtherSliceList` 对此
+不报参数错误，仍然返回 `code=301 没有剪辑权限` —— 即使账号确实已获该主播授权，
+看着就像"没权限"，很容易误判成权限问题。
+
+更难办的是 `live_user/v1/Master/info?uid={不存在的uid}` 依然返回 `code=0`，
+只是 `data.info.uname` 为空、`data.room_id` 为 0。所以**判断 uid 是否有效必须看
+`uname` 是否非空，不能只看 code**。
+
+房号 → UID 的换算：`room/v1/Room/get_info?room_id={房号}` 返回的 `data.uid` 即主播 UID
+（实测房号 `81004` → `uid=1521415`）。反向：`Master/info` 的 `data.room_id` 是该主播
+当前直播间号（换房间号后会变，故只适合展示，不适合做稳定标识）。
+
+LuboDown 的处理：`resolve_anchor()` 先按 UID 查、失败再按房号查；检测到用户填的是房号时
+自动换算并写回配置，避免把"填错字段"误报成"未授权"。
 
 ## 验证工具
 

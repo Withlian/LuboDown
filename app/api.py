@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .downloader import resolve_ffmpeg
+from .qrlogin import QrLoginManager
 from .store import ACTIVE_STATES, SETTING_SPECS, clamp_setting
 
 
@@ -15,6 +16,7 @@ class Api:
         self._client = client
         self._manager = manager
         self._scheduler = scheduler
+        self._qr = QrLoginManager(store, client)
         self._window = None  # main.py 启动后注入
         self._frame = None
 
@@ -97,8 +99,58 @@ class Api:
                        + ("（含新凭证）" if ("sessdata" in clean or "bili_jct" in clean) else ""))
         return {"ok": True}
 
+    # ============ B 站账号（扫码登录） ============
+    def qr_start(self) -> dict:
+        """生成登录二维码并开始轮询；再次调用即刷新。"""
+        return self._qr.start()
+
+    def qr_status(self) -> dict:
+        """扫码状态：{state, message, image, logged_in, account}。前端按固定间隔取。"""
+        return self._qr.status()
+
+    def qr_cancel(self) -> dict:
+        self._qr.cancel()
+        return {"ok": True}
+
+    def logout(self) -> dict:
+        """退出登录：只清本机凭证，不调 B 站退出接口（避免其他设备被踢下线）。"""
+        self._qr.cancel()
+        self._store.save_settings({"sessdata": "", "bili_jct": "", "dede_user_id": "",
+                                   "user_name": "", "user_face": ""})
+        self._store.log("已退出 B 站账号")
+        return {"ok": True}
+
+    def account_info(self) -> dict:
+        """用当前凭证拉一次账号信息（手动填 Cookie 后补齐昵称头像）。"""
+        acc = self._client.get_account()
+        if not acc:
+            return {"ok": False, "message": "凭证无效或已过期"}
+        self._store.save_settings({"user_name": acc.get("name") or "",
+                                   "user_face": acc.get("face") or "",
+                                   "dede_user_id": str(acc.get("mid") or "")})
+        return {"ok": True, **acc}
+
     def verify_cookie(self) -> dict:
         result = self._client.verify_login()
+        fixes = result.pop("fix", None) or []
+        if fixes:
+            # 用户把直播间房号当 UID 填了：自动纠正后再检测一次，结果才反映真实权限
+            anchors = self._store.settings.get("anchors", [])
+            m = {f["from"]: f for f in fixes}
+            corrected = []
+            for a in anchors:
+                try:
+                    f = m.get(int(a["uid"]))
+                except (KeyError, TypeError, ValueError):
+                    corrected.append(a)
+                    continue
+                corrected.append({"uid": f["to"], "name": f["name"]} if f else a)
+            self._store.save_settings({"anchors": corrected})
+            note = "；".join(f"房号 {f['from']} → UID {f['to']}" for f in fixes)
+            self._store.log(f"已自动修正主播 UID：{note}")
+            result = self._client.verify_login()
+            result.pop("fix", None)
+            result["message"] = f"{result['message']}（已自动修正 {note}）"
         self._store.log(f"凭证检测：{result['message']}",
                        "info" if result["ok"] else "error")
         return result
@@ -152,22 +204,28 @@ class Api:
     def add_anchor(self, uid: int) -> dict:
         try:
             uid = int(uid)
-            info = self._client.get_master_info(uid)
         except (TypeError, ValueError):
-            return {"ok": False, "message": "UID 必须是数字"}
+            return {"ok": False, "message": "请填数字：主播 UID 或直播间房号"}
+        try:
+            hit = self._client.resolve_anchor(uid)
         except Exception as e:
             return {"ok": False, "message": f"查询主播失败：{e}"}
+        if not hit["valid"]:
+            return {"ok": False,
+                    "message": f"{uid} 既不是主播 UID 也不是直播间房号，请核对后重填"}
         anchors = self._store.settings.get("anchors", [])
         for a in anchors:
             try:
-                if int(a["uid"]) == uid:
+                if int(a["uid"]) == hit["uid"]:
                     return {"ok": False, "message": "该主播已存在"}
             except (KeyError, TypeError, ValueError):
                 continue    # 跳过配置中的异常条目
-        anchors.append({"uid": uid, "name": info.get("name") or str(uid)})
+        anchors.append({"uid": hit["uid"], "name": hit["name"]})
         self._store.save_settings({"anchors": anchors})
-        self._store.log(f"已添加主播：{info.get('name')}（{uid}）")
-        return {"ok": True, "name": info.get("name")}
+        note = f"（{uid} 是房间号，已按 UID {hit['uid']} 添加）" if hit["via_room"] else ""
+        self._store.log(f"已添加主播：{hit['name']}（{hit['uid']}）{note}")
+        return {"ok": True, "name": hit["name"], "uid": hit["uid"],
+                "message": f"已添加 {hit['name']}（UID {hit['uid']}）{note}"}
 
     def remove_anchor(self, uid: int) -> dict:
         anchors = []
@@ -189,7 +247,7 @@ class Api:
     def refresh_list(self) -> dict:
         """仅刷新列表，不触发自动下载。"""
         if not self._store.settings.get("sessdata"):
-            return {"ok": False, "message": "请先在设置中填写 SESSDATA"}
+            return {"ok": False, "message": "请先在设置中扫码登录 B 站账号"}
         try:
             result = self._scheduler.run_check()
         except Exception as e:
